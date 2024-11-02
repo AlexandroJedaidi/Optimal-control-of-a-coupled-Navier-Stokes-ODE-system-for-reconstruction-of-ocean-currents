@@ -1,0 +1,12 @@
+# requirements.txt
+numpy
+scipy
+matplotlib
+pandas
+tqdm
+petsc4py==3.17.0
+mpi4py==3.1.3
+basix
+ufl
+pyvista
+gmesh
