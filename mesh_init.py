@@ -7,8 +7,8 @@ from dolfinx.io import (VTXWriter, distribute_entity_data, gmshio)
 # mesh initialization used from the dolfinx tutorial and adjusted for our purposes
 gmsh.initialize()
 
-L = 1.2
-H = 0.41
+L = 1
+H = 1
 c_x = c_y = 0.2
 r = 0.05
 
