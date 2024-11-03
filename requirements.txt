@@ -10,3 +10,6 @@ basix
 ufl
 pyvista
 gmesh
+vistex
+multiphenicsx
+sympy
