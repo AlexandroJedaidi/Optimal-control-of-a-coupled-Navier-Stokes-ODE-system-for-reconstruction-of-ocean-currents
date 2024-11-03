@@ -20,7 +20,7 @@ from NonlinearBlockProblem import NonlinearBlockProblem
 from plotting import plot_array
 
 # ---------------------------------------------------------------------------------------------------------------------
-experiment_number = 1
+experiment_number = 2
 experiment_path = f'results/experiments/{experiment_number}'
 os.mkdir(experiment_path)
 np_path = f'results/experiments/{experiment_number}/arrays'
@@ -212,13 +212,10 @@ b_arr = b.x.array
 num_velocity_dofs = Y_velocity.dofmap.index_map_bs * Y_velocity.dofmap.index_map.size_global
 num_pressure_dofs = Y_pressure.dofmap.index_map_bs * Y_velocity.dofmap.index_map.size_global
 label = r"FEniCSx  ({0:d} dofs)".format(num_velocity_dofs + num_pressure_dofs)
+
 plot_array(None, v_arr, label, "state_velocity", plot_path)
-# viskex.dolfinx.plot_vector_field(v, "state velocity", glyph_factor=1e-1)
+plot_array(None, p_arr, label, "state_pressure", plot_path)
+plot_array(None, u_arr, label, "control", plot_path)
+plot_array(None, z_arr, label, "adjoint_velocity", plot_path)
+plot_array(None, b_arr, label, "adjoint_pressure", plot_path)
 
-# viskex.dolfinx.plot_scalar_field(p, "state pressure")
-
-# viskex.dolfinx.plot_vector_field(u, "control", glyph_factor=1e-1)
-
-# viskex.dolfinx.plot_vector_field(z, "adjoint velocity", glyph_factor=1)
-
-# viskex.dolfinx.plot_scalar_field(b, "adjoint pressure")
