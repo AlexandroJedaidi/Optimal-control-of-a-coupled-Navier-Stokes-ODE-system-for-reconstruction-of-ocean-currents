@@ -2,6 +2,8 @@ import gmsh
 import numpy as np
 from mpi4py import MPI
 from dolfinx.io import (VTXWriter, distribute_entity_data, gmshio)
+import dolfinx
+import json
 
 # ---------------------------------------------------------------------------------------------------------------------
 # mesh initialization used from the dolfinx tutorial and adjusted for our purposes
@@ -11,19 +13,22 @@ L = 1
 H = 1
 c_x = c_y = 0.2
 r = 0.05
+with open("parameters.json", "r") as file:
+    parameters = json.load(file)
+    t0 = parameters["t0"]
+    T = parameters["T"]
+    h = parameters["dt"]
+    viscosity = parameters["viscosity"]
+    K = parameters["buoy count"]
 
 
-def create_mesh(gdim, obst=True):
+def create_mesh(gdim):
     mesh_comm = MPI.COMM_WORLD
     model_rank = 0
     if mesh_comm.rank == model_rank:
         rectangle = gmsh.model.occ.addRectangle(0, 0, 0, L, H, tag=1)
-        if obst:
-            obstacle = gmsh.model.occ.addDisk(c_x, c_y, 0, r, r)
 
     if mesh_comm.rank == model_rank:
-        if obst:
-            fluid = gmsh.model.occ.cut([(gdim, rectangle)], [(gdim, obstacle)])
         gmsh.model.occ.synchronize()
 
     fluid_marker = 1
@@ -33,29 +38,21 @@ def create_mesh(gdim, obst=True):
         gmsh.model.addPhysicalGroup(volumes[0][0], [volumes[0][1]], fluid_marker)
         gmsh.model.setPhysicalName(volumes[0][0], fluid_marker, "Fluid")
 
-    inlet_marker, outlet_marker, wall_marker, obstacle_marker = 2, 3, 4, 5
-    inflow, outflow, walls, obstacle = [], [], [], []
+    inlet_marker, wall_marker = 2, 3
+    inflow, walls = [], []
     if mesh_comm.rank == model_rank:
         boundaries = gmsh.model.getBoundary(volumes, oriented=False)
         for boundary in boundaries:
             center_of_mass = gmsh.model.occ.getCenterOfMass(boundary[0], boundary[1])
             if np.allclose(center_of_mass, [0, H / 2, 0]):
                 inflow.append(boundary[1])
-            elif np.allclose(center_of_mass, [L, H / 2, 0]):
-                outflow.append(boundary[1])
-            elif np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass, [L / 2, 0, 0]):
+            elif np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass, [L / 2, 0, 0]) or np.allclose(center_of_mass, [L, H / 2, 0]):
                 walls.append(boundary[1])
-            else:
-                obstacle.append(boundary[1])
 
         gmsh.model.addPhysicalGroup(1, walls, wall_marker)
         gmsh.model.setPhysicalName(1, wall_marker, "Walls")
         gmsh.model.addPhysicalGroup(1, inflow, inlet_marker)
         gmsh.model.setPhysicalName(1, inlet_marker, "Inlet")
-        gmsh.model.addPhysicalGroup(1, outflow, outlet_marker)
-        gmsh.model.setPhysicalName(1, outlet_marker, "Outlet")
-        gmsh.model.addPhysicalGroup(1, obstacle, obstacle_marker)
-        gmsh.model.setPhysicalName(1, obstacle_marker, "Obstacle")
 
     # Create distance field from obstacle.
     # Add threshold of mesh sizes based on the distance field
@@ -90,5 +87,6 @@ def create_mesh(gdim, obst=True):
     mesh, _, ft = gmshio.model_to_mesh(gmsh.model, mesh_comm, model_rank, gdim=gdim)
     ft.name = "Facet markers"
     gmsh.write("mesh.msh")
-    return mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker
 
+    mesh_t = dolfinx.mesh.create_interval(MPI.COMM_WORLD, int(T / h), (t0, T))
+    return mesh, ft, inlet_marker, wall_marker, mesh_t
