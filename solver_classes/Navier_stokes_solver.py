@@ -51,7 +51,6 @@ class NavierStokes:
         self.set_function_spaces()
         self.set_functions()
         self.set_boundary_conditions()
-        self.set_adjoint_equation()
 
     def set_function_spaces(self):
         self.Q = dolfinx.fem.functionspace(self.mesh, ("Lagrange", 2, (self.mesh.geometry.dim,)))
@@ -59,13 +58,14 @@ class NavierStokes:
         self.U_adj = self.U.clone()
         self.Q_adj = self.Q.clone()
 
-        self.X = dolfinx.fem.functionspace(self.mesh_t, ("Lagrange", 2, (self.mesh.geometry.dim,)))
+        self.X = dolfinx.fem.functionspace(self.mesh_t, ("Lagrange", 2, (self.mesh_t.geometry.dim,)))
         self.X_adj = self.X.clone()
 
     def set_boundary_conditions(self):
-        #n = FacetNormal(self.mesh)
+        # n = FacetNormal(self.mesh)
         u_nonslip = np.array((0,) * self.mesh.geometry.dim, dtype=PETSc.ScalarType)
-        self.bc = dirichletbc(u_nonslip, locate_dofs_topological(self.U, self.fdim, self.ft.find(self.wall_marker)), self.U)
+        self.bc = dirichletbc(u_nonslip, locate_dofs_topological(self.U, self.fdim, self.ft.find(self.wall_marker)),
+                              self.U)
         self.dx = ufl.Measure('dx', domain=self.mesh)
         self.dt = ufl.Measure('dx', domain=self.mesh_t)
         self.ds = ufl.Measure("ds", subdomain_data=self.inlet_marker)
@@ -84,24 +84,22 @@ class NavierStokes:
         f = Constant(self.mesh, PETSc.ScalarType((0, 0)))
         F1 = self.viscosity * inner(grad(self.u), grad(self.v)) * self.dx
         F1 += inner(dot(self.u, nabla_grad(self.u)), self.v) * self.dx
-        F1 -= inner(q, self.v) * ds    #can be done over whole Gamma, since v = 0 on Gamma_2
+        F1 -= inner(q, self.v) * ds  # can be done over whole Gamma, since v = 0 on Gamma_2
         F1 -= inner(f, self.v) * self.dx
         return F1
 
-    def set_adjoint_equation(self):
+    def set_adjoint_equation(self, lam_2):
         F2 = self.viscosity * inner(grad(self.lam_1), grad(self.delta_u)) * self.dx
         F2 += inner(self.lam_1, dot(self.delta_u, nabla_grad(self.u))) * self.dx
         F2 += inner(self.lam_1, dot(self.u, nabla_grad(self.delta_u))) * self.dx
         for i in range(0, self.K):
-            F2 += inner(self.lam_2[i], self.delta_u(self.x[i])) * self.dt
+            F2 += inner(lam_2[i], self.delta_u(self.x[i])) * self.dt
         for i in range(0, self.K):
             F2 += inner(self.u - self.u_d_dolfin[i], self.delta_u(self.x[i])) * self.dt
-        self.F_adj = F2
+        return F2
 
     def state_solving_step(self, q):
-        q_dolf = Function(self.Q)
-        f = sc.interpolate.interpolate(q_dolf, self.u)
-        q_dolf = q # TODO
+        q_dolf = self.numpy_to_dolfin(q)
         F = self.set_state_equation(q_dolf)
         problem = dolfinx.fem.petsc.NonlinearProblem(F, self.u, bcs=[self.bc])
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
@@ -113,10 +111,8 @@ class NavierStokes:
         return self.u
 
     def adjoint_state_solving_step(self, lam_2, u, x):
-        self.lam_2 = lam_2
-        self.u = u
-        self.x = x
-        adj_problem = dolfinx.fem.petsc.NonlinearProblem(self.F_adj, self.lam_1)
+        F_adj = self.set_adjoint_equation(lam_2)
+        adj_problem = dolfinx.fem.petsc.NonlinearProblem(F_adj, self.lam_1)
         adj_solver = NewtonSolver(MPI.COMM_WORLD, adj_problem)
         adj_solver.convergence_criterion = "incremental"
         adj_solver.report = True
@@ -125,3 +121,29 @@ class NavierStokes:
         n, converged = adj_solver.solve(self.lam_1)
         return self.lam_1
 
+    def numpy_to_dolfin(self, q):
+        q_dolf = Function(self.Q)
+        x, y, z = (self.mesh.geometry.x[:, 0], self.mesh.geometry.x[:, 1], self.mesh.geometry.x[:, 2])
+        xx = x[locate_dofs_topological(self.U, self.fdim, self.ft.find(self.inlet_marker))]
+        yy = y[locate_dofs_topological(self.U, self.fdim, self.ft.find(self.inlet_marker))]
+        i = np.argsort(yy)
+        xx_sorted = xx[i]
+        yy_sorted = yy[i]
+        q_sorted = q[i]
+        f = sc.interpolate.interp1d(yy_sorted, q_sorted)
+
+        def g(x):
+            values = np.zeros((2, x.shape[1]), dtype=PETSc.ScalarType)
+            temp = []
+            for y_val in x[1]:
+                if y_val < 0.0:
+                    temp.append(f(0.0))
+                elif y_val > 1.0:
+                    temp.append(f(1.0))
+                else:
+                    temp.append(f(y_val))
+            values[1] = temp
+            return values
+
+        q_dolf.interpolate(g)
+        return q_dolf
