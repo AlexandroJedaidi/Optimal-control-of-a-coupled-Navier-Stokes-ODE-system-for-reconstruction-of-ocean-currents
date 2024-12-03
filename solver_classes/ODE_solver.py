@@ -39,6 +39,7 @@ def reconstruct_mesh_points(axis):
 class ODE:
 
     def __init__(self, mesh, ft, inlet_marker, wall_marker, mesh_t):
+        self.sol = None
         self.time_discr = 33 # TODO: time discr. step size
         self.X = None
         self.X_adj = None
@@ -86,43 +87,83 @@ class ODE:
         self.x = [Function(self.X) for _ in range(self.K)]
         self.lam_2 = [Function(self.X_adj) for _ in range(self.K)]
 
-        self.x0 = [[0.0 + i / 10.1, 0.0 + i / 10.1] for i in range(self.K)]
-        self.lam_2_0 = [[0.0, 0.0] for i in range(self.K)]
+        self.x0 = [Constant(self.mesh_t,[0.0 + i / 10.1, 0.0 + i / 10.1]) for i in range(self.K)]
+        self.lam_2_0 = [Constant(self.mesh_t,[0.0, 0.0]) for i in range(self.K)]
 
     def ode_solving_step(self, u_dolf):
+        # explicit euler
+        time_interval = self.mesh_t.geometry.x[:,0]
+        N = time_interval.shape[0]
+        h = self.T / N
+        x_dolf_list = []
+        for b in range(self.K):
+            x_sol = [self.x0[b]]
+            for k, t_k in enumerate(time_interval):
+                x_i = x_sol[k] + h * u_dolf(self.x[b](t_k))
+                x_sol.append(x_i)
+            from IPython import embed
+            embed()
+            f = sc.interpolate.interp1d(time_interval, x_sol[:N].x.array)
+            x_dolf = Function(self.X)
+            def g(x):
+                values = np.zeros((2, self.x.shape[1]), dtype=PETSc.ScalarType)
+                temp = []
+                for y_val in x[1]:
+                    if y_val < 0.0:
+                        temp.append(f(0.0))
+                    elif y_val > 1.0:
+                        temp.append(f(1.0))
+                    else:
+                        temp.append(f(y_val))
+                values[1] = temp
+                return values
 
-        def u_scp(x, t):
+            x_dolf.interpolate(g)
+            x_dolf_list.append(x_dolf)
+        old_code = """def u_scp(x, t):
             point = np.array([x[0], x[1], 0])
             u_scp = self.dolfinx_to_numpy(point, u_dolf)
             return u_scp
 
-        self.sol = []
         for k in range(self.K):
             x_sol_np = odeint(u_scp, self.x0[k], np.linspace(self.t0, self.T, self.time_discr))
             #x_sol_dolfinx = self.numpy_to_dolfin(x_sol_np)  # TODO: to dolfinx not necessary?
-            self.sol.append(x_sol_np)
+            from IPython import embed
+            embed()
+            x_sol_expr = dolfinx.fem.Expression(x_sol_np, self.X.element.interpolation_points())
+            self.sol.append(x_sol_np)"""
+        from IPython import embed
+        embed()
         return self.sol
 
     def adjoint_ode_solving_step(self, u_dolf, u_dk, x_k):
         self.adj_sol_dolfinx = []
-        for k in range(self.K):
+        time_interval = (self.mesh_t.geometry.x[:,0])[::-1]
+        N = time_interval.shape[0]
+        h = self.T / N
+        lambd2_sol = [self.lam_2_0]
+        for k, t_k in enumerate(time_interval):
+            lambd2_b = []
+            for b in range(self.K):
+                lambd2_i = lambd2_sol[k][b] + h * (ufl.grad(u_dolf(x_k[N-k][b])) * (u_dolf(x_k[N-k][b]) - u_dk[b] + lambd2_sol[k][b]))
+                lambd2_b.append(lambd2_i)
+            lambd2_sol.append(lambd2_b)
+
+        self.adj_sol_dolfinx = lambd2_sol[::-1]
+
+        old_code = """for k in range(self.K):
             grad_u_dolfin = ufl.grad(u_dolf(list(x_k[k])))  # TODO: to np
             U_dash = dolfinx.fem.functionspace(self.mesh,
                                                ("Lagrange", 2, (self.mesh.geometry.dim, self.mesh.geometry.dim)))
             grad_u = Function(U_dash)
             grad_u_expr = dolfinx.fem.Expression(grad_u_dolfin, U_dash.element.interpolation_points())
             grad_u.interpolate(grad_u_expr)
-            # grad_u_np = []
-            # for i, elem in enumerate(x_k[k]):
-            #     point = np.concatenate((x_k[k][i], [0.0]))
-            #     grad_u_np.append(self.dolfinx_to_numpy(point, grad_u))
-            from IPython import embed
-            embed()
+
             u_scp = lambda t, lam_2: grad_u(x_k[k](t)) @ (u_dolf(x_k[k](t)) - u_dk[k] + lam_2)
-            adj_sol_np = odeint(u_scp, self.lam_2_0[k], np.linspace(-self.T, -self.t0), 33)
+            adj_sol_np = odeint(u_scp, self.lam_2_0[k], np.linspace(-self.T, -self.t0, self.time_discr))
             adj_sol_np = adj_sol_np[::-1]
             adj_sol_dolfinx = self.numpy_to_dolfin(adj_sol_np, self.mesh, 3)  # TODO: to dolfinx
-            self.sol.append(adj_sol_dolfinx)
+            self.sol.append(adj_sol_dolfinx)"""
         return self.adj_sol_dolfinx
 
     def dolfinx_to_numpy(self, point, func):
