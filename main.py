@@ -15,6 +15,7 @@ import mesh_init
 import solver_classes.Navier_stokes_solver
 import solver_classes.ODE_solver
 # ----------------------------------------------------------------------------------------------------------------------
+experiment_number = 1
 # Discretization parameters
 with open("parameters.json", "r") as file:
     parameters = json.load(file)
@@ -29,13 +30,14 @@ with open("parameters.json", "r") as file:
 # Mesh
 gmsh.initialize()
 gdim = 2
-mesh, ft, inlet_marker, wall_marker, mesh_t = mesh_init.create_mesh(gdim)
+# mesh, ft, inlet_marker, wall_marker = mesh_init.create_mesh(gdim)
+mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_pipe_mesh(gdim)
 # ----------------------------------------------------------------------------------------------------------------------
-NS_instance = solver_classes.Navier_stokes_solver.NavierStokes(mesh, ft, inlet_marker, wall_marker, mesh_t)
-ODE_instance = solver_classes.ODE_solver.ODE(mesh, ft, inlet_marker, wall_marker, mesh_t)
+NS_instance = solver_classes.Navier_stokes_solver.NavierStokes(mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker, experiment_number)
+ODE_instance = solver_classes.ODE_solver.ODE(mesh, ft, inlet_marker, wall_marker)
 num_steps = 1000
 for i in range(num_steps):
-    q = np.ones(33)
+    q = Constant(mesh, PETSc.ScalarType((1, 1)))
     u = NS_instance.state_solving_step(q)
     x = ODE_instance.ode_solving_step(u)
     lamb_2 = ODE_instance.adjoint_ode_solving_step(u, NS_instance.u_d_dolfin, x)

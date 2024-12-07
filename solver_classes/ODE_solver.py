@@ -1,4 +1,6 @@
 import json
+import sys
+
 import gmsh
 import dolfinx
 import mesh_init
@@ -38,9 +40,10 @@ def reconstruct_mesh_points(axis):
 
 class ODE:
 
-    def __init__(self, mesh, ft, inlet_marker, wall_marker, mesh_t):
+    def __init__(self, mesh, ft, inlet_marker, wall_marker):
+        self.time_interval = None
         self.sol = None
-        self.time_discr = 33 # TODO: time discr. step size
+        self.time_discr = 33  # TODO: time discr. step size
         self.X = None
         self.X_adj = None
         self.lam_1 = None
@@ -61,7 +64,6 @@ class ODE:
         self.ft = ft
         self.inlet_marker = inlet_marker
         self.wall_marker = wall_marker
-        self.mesh_t = mesh_t
         self.fdim = mesh.topology.dim - 1
         with open("parameters.json", "r") as file:
             parameters = json.load(file)
@@ -70,29 +72,38 @@ class ODE:
             self.h = parameters["dt"]
             self.viscosity = parameters["viscosity"]
             self.K = parameters["buoy count"]
+            self.dt = parameters["dt"]
 
         self.set_function_spaces()
         self.set_functions()
 
     def set_function_spaces(self):
-        self.X = dolfinx.fem.functionspace(self.mesh_t, ("Lagrange", 2, (self.mesh.geometry.dim,)))
-        self.X_adj = self.X.clone()
 
         self.U = dolfinx.fem.functionspace(self.mesh, ("Lagrange", 2, (self.mesh.geometry.dim,)))
         self.U_adj = self.U.clone()
 
+        self.time_interval = np.linspace(self.t0, self.T, int(self.T/self.dt))
+
     def set_functions(self):
         self.lam_1 = TrialFunction(self.U_adj)
 
-        self.x = [Function(self.X) for _ in range(self.K)]
-        self.lam_2 = [Function(self.X_adj) for _ in range(self.K)]
+        # self.x = [Function(self.X) for _ in range(self.K)]
+        # self.lam_2 = [Function(self.X_adj) for _ in range(self.K)]
 
-        self.x0 = [Constant(self.mesh_t,[0.0 + i / 10.1, 0.0 + i / 10.1]) for i in range(self.K)]
-        self.lam_2_0 = [Constant(self.mesh_t,[0.0, 0.0]) for i in range(self.K)]
+        # self.x0 = [Constant(self.mesh_t, [0.0 + i / 10.1, 0.0 + i / 10.1]) for i in range(self.K)]
+        # self.lam_2_0 = [Constant(self.mesh_t, [0.0, 0.0]) for i in range(self.K)]
 
     def ode_solving_step(self, u_dolf):
         # explicit euler
-        time_interval = self.mesh_t.geometry.x[:,0]
+        sys.exit()
+        for b in range(self.K):
+            for k, t_k in enumerate(self.time_interval):
+                print(k)
+                print(t_k)
+        # from IPython import embed
+        # embed()
+
+        time_interval = self.mesh_t.geometry.x[:, 0]
         N = time_interval.shape[0]
         h = self.T / N
         x_dolf_list = []
@@ -101,10 +112,11 @@ class ODE:
             for k, t_k in enumerate(time_interval):
                 x_i = x_sol[k] + h * u_dolf(self.x[b](t_k))
                 x_sol.append(x_i)
-            from IPython import embed
-            embed()
+            # from IPython import embed
+            # embed()
             f = sc.interpolate.interp1d(time_interval, x_sol[:N].x.array)
             x_dolf = Function(self.X)
+
             def g(x):
                 values = np.zeros((2, self.x.shape[1]), dtype=PETSc.ScalarType)
                 temp = []
@@ -138,14 +150,15 @@ class ODE:
 
     def adjoint_ode_solving_step(self, u_dolf, u_dk, x_k):
         self.adj_sol_dolfinx = []
-        time_interval = (self.mesh_t.geometry.x[:,0])[::-1]
+        time_interval = (self.mesh_t.geometry.x[:, 0])[::-1]
         N = time_interval.shape[0]
         h = self.T / N
         lambd2_sol = [self.lam_2_0]
         for k, t_k in enumerate(time_interval):
             lambd2_b = []
             for b in range(self.K):
-                lambd2_i = lambd2_sol[k][b] + h * (ufl.grad(u_dolf(x_k[N-k][b])) * (u_dolf(x_k[N-k][b]) - u_dk[b] + lambd2_sol[k][b]))
+                lambd2_i = lambd2_sol[k][b] + h * (
+                            ufl.grad(u_dolf(x_k[N - k][b])) * (u_dolf(x_k[N - k][b]) - u_dk[b] + lambd2_sol[k][b]))
                 lambd2_b.append(lambd2_i)
             lambd2_sol.append(lambd2_b)
 
@@ -228,7 +241,6 @@ class ODE:
         # xx = reconstruct_mesh_points(x)
         # yy = reconstruct_mesh_points(y)
         # zz = reconstruct_mesh_points(z)
-        #f = sc.interpolate.RegularGridInterpolator((np.array(xx), np.array(yy)), u[:,0])
-
+        # f = sc.interpolate.RegularGridInterpolator((np.array(xx), np.array(yy)), u[:,0])
 
         return x_dolf
