@@ -82,7 +82,7 @@ class ODE:
         self.U = dolfinx.fem.functionspace(self.mesh, ("Lagrange", 2, (self.mesh.geometry.dim,)))
         self.U_adj = self.U.clone()
 
-        self.time_interval = np.linspace(self.t0, self.T, int(self.T/self.dt))
+        self.time_interval = np.linspace(self.t0, self.T, int(self.T / self.dt))
 
     def set_functions(self):
         self.lam_1 = TrialFunction(self.U_adj)
@@ -95,15 +95,14 @@ class ODE:
 
     def ode_solving_step(self, u_dolf):
         # explicit euler
-        sys.exit()
+        x_solutions = np.zeros((self.K, int(self.T / self.dt)))
         for b in range(self.K):
+            x_sol = np.zeros((1, int(self.T / self.dt)))
             for k, t_k in enumerate(self.time_interval):
-                print(k)
-                print(t_k)
-        # from IPython import embed
-        # embed()
+                x_sol[k + 1] = x_sol[k] + self.h * u_dolf(self.x[b](t_k)).x.array
+            x_solutions[b] = x_sol
 
-        time_interval = self.mesh_t.geometry.x[:, 0]
+        old_code = """time_interval = self.mesh_t.geometry.x[:, 0]
         N = time_interval.shape[0]
         h = self.T / N
         x_dolf_list = []
@@ -132,7 +131,7 @@ class ODE:
 
             x_dolf.interpolate(g)
             x_dolf_list.append(x_dolf)
-        old_code = """def u_scp(x, t):
+        def u_scp(x, t):
             point = np.array([x[0], x[1], 0])
             u_scp = self.dolfinx_to_numpy(point, u_dolf)
             return u_scp
@@ -144,8 +143,6 @@ class ODE:
             embed()
             x_sol_expr = dolfinx.fem.Expression(x_sol_np, self.X.element.interpolation_points())
             self.sol.append(x_sol_np)"""
-        from IPython import embed
-        embed()
         return self.sol
 
     def adjoint_ode_solving_step(self, u_dolf, u_dk, x_k):
@@ -158,7 +155,7 @@ class ODE:
             lambd2_b = []
             for b in range(self.K):
                 lambd2_i = lambd2_sol[k][b] + h * (
-                            ufl.grad(u_dolf(x_k[N - k][b])) * (u_dolf(x_k[N - k][b]) - u_dk[b] + lambd2_sol[k][b]))
+                        ufl.grad(u_dolf(x_k[N - k][b])) * (u_dolf(x_k[N - k][b]) - u_dk[b] + lambd2_sol[k][b]))
                 lambd2_b.append(lambd2_i)
             lambd2_sol.append(lambd2_b)
 
