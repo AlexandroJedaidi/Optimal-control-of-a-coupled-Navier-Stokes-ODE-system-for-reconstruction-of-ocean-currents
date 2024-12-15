@@ -1,9 +1,10 @@
 {
-  "viscosity": 0.01,
+  "viscosity": 0.05,
   "buoy count": 10,
   "t0": 0.0,
   "T": 10,
   "dt": 0.01,
   "alpha": 0.175,
-  "gamma": 0.3
+  "gamma": 0.3,
+  "LR": 0.1
 }

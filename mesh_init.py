@@ -94,7 +94,7 @@ def create_mesh(gdim):
     return mesh, ft, inlet_marker, wall_marker
 
 
-def create_pipe_mesh(gdim, obst=True):
+def create_pipe_mesh(gdim, obst=False):
     L = 2.2
     H = 0.41
     c_x = c_y = 0.2
@@ -140,8 +140,8 @@ def create_pipe_mesh(gdim, obst=True):
         gmsh.model.setPhysicalName(1, inlet_marker, "Inlet")
         gmsh.model.addPhysicalGroup(1, outflow, outlet_marker)
         gmsh.model.setPhysicalName(1, outlet_marker, "Outlet")
-        gmsh.model.addPhysicalGroup(1, obstacle, obstacle_marker)
-        gmsh.model.setPhysicalName(1, obstacle_marker, "Obstacle")
+        # gmsh.model.addPhysicalGroup(1, obstacle, obstacle_marker)
+        # gmsh.model.setPhysicalName(1, obstacle_marker, "Obstacle")
 
     # Create distance field from obstacle.
     # Add threshold of mesh sizes based on the distance field
@@ -176,4 +176,4 @@ def create_pipe_mesh(gdim, obst=True):
     mesh, _, ft = gmshio.model_to_mesh(gmsh.model, mesh_comm, model_rank, gdim=gdim)
     ft.name = "Facet markers"
     gmsh.write("mesh.msh")
-    return mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker
+    return mesh, ft, inlet_marker, wall_marker, outlet_marker

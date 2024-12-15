@@ -17,6 +17,7 @@ from scipy.integrate import odeint
 import numpy as np
 import scipy as sc
 import math
+import random
 
 
 def reconstruct_mesh_points(axis):
@@ -72,7 +73,6 @@ class ODE:
             self.h = parameters["dt"]
             self.viscosity = parameters["viscosity"]
             self.K = parameters["buoy count"]
-            self.dt = parameters["dt"]
 
         self.set_function_spaces()
         self.set_functions()
@@ -82,10 +82,18 @@ class ODE:
         self.U = dolfinx.fem.functionspace(self.mesh, ("Lagrange", 2, (self.mesh.geometry.dim,)))
         self.U_adj = self.U.clone()
 
-        self.time_interval = np.linspace(self.t0, self.T, int(self.T / self.dt))
+        self.time_interval = np.linspace(self.t0, self.T, int(self.T / self.h))
+        self.N = len(self.time_interval[1:])
 
     def set_functions(self):
         self.lam_1 = TrialFunction(self.U_adj)
+        self.x = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
+        self.x[:, 0, 0] = np.array([random.uniform(0.5, 1.9) for _ in range(self.K)])
+        self.x[:, 0, 1] = np.array([random.uniform(0.1, 0.35) for _ in range(self.K)])
+
+        self.lam_2 = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
+
+        self.u_d = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
 
         # self.x = [Function(self.X) for _ in range(self.K)]
         # self.lam_2 = [Function(self.X_adj) for _ in range(self.K)]
@@ -93,14 +101,20 @@ class ODE:
         # self.x0 = [Constant(self.mesh_t, [0.0 + i / 10.1, 0.0 + i / 10.1]) for i in range(self.K)]
         # self.lam_2_0 = [Constant(self.mesh_t, [0.0, 0.0]) for i in range(self.K)]
 
-    def ode_solving_step(self, u_dolf):
+    def ode_solving_step(self, u):
         # explicit euler
-        x_solutions = np.zeros((self.K, int(self.T / self.dt)))
+        bb_tree = dolfinx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
         for b in range(self.K):
-            x_sol = np.zeros((1, int(self.T / self.dt)))
-            for k, t_k in enumerate(self.time_interval):
-                x_sol[k + 1] = x_sol[k] + self.h * u_dolf(self.x[b](t_k)).x.array
-            x_solutions[b] = x_sol
+            for k, t_k in enumerate(self.time_interval[:-1]):
+                point = np.array([self.x[b, k, :][0].item(), self.x[b, k, :][1].item(), 0])
+                cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, point)
+                colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates, point).array
+                if len(colliding_cells) == 0:
+                    print("no colliding cells")
+                    from IPython import embed
+                    embed()
+                u_values = u.eval(point, colliding_cells[0])
+                self.x[b, k + 1, :] = self.x[b, k, :] + self.h * u_values
 
         old_code = """time_interval = self.mesh_t.geometry.x[:, 0]
         N = time_interval.shape[0]
@@ -143,23 +157,32 @@ class ODE:
             embed()
             x_sol_expr = dolfinx.fem.Expression(x_sol_np, self.X.element.interpolation_points())
             self.sol.append(x_sol_np)"""
-        return self.sol
+        return self.x, self.h, self.N, self.u_d
 
-    def adjoint_ode_solving_step(self, u_dolf, u_dk, x_k):
-        self.adj_sol_dolfinx = []
-        time_interval = (self.mesh_t.geometry.x[:, 0])[::-1]
-        N = time_interval.shape[0]
-        h = self.T / N
-        lambd2_sol = [self.lam_2_0]
-        for k, t_k in enumerate(time_interval):
-            lambd2_b = []
-            for b in range(self.K):
-                lambd2_i = lambd2_sol[k][b] + h * (
-                        ufl.grad(u_dolf(x_k[N - k][b])) * (u_dolf(x_k[N - k][b]) - u_dk[b] + lambd2_sol[k][b]))
-                lambd2_b.append(lambd2_i)
-            lambd2_sol.append(lambd2_b)
+    def adjoint_ode_solving_step(self, u):
+        grad_u = ufl.grad(u)
+        U_grad_fp = dolfinx.fem.functionspace(self.mesh,
+                                              ("Lagrange", 1, (self.mesh.geometry.dim, self.mesh.geometry.dim)))
+        u_grad_expr = dolfinx.fem.Expression(grad_u, U_grad_fp.element.interpolation_points())
+        u_grad_fct = dolfinx.fem.Function(U_grad_fp)
+        u_grad_fct.interpolate(u_grad_expr)
+        bb_tree = dolfinx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
+        for b in range(self.K):
+            N = len(self.time_interval[1:])
+            for k in range(N, 0, -1):
+                point = np.array([self.x[b, k, :][0].item(), self.x[b, k, :][1].item(), 0])
+                cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, point)
+                colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates, point).array
+                if len(colliding_cells) < 0:
+                    print("no colliding cells")
+                    from IPython import embed
+                    embed()
+                grad_u_values = u_grad_fct.eval(point, colliding_cells[0])
+                grad_u_matr = np.array([[grad_u_values[0].item(), grad_u_values[1].item()], [grad_u_values[2].item(), grad_u_values[3].item()]])
 
-        self.adj_sol_dolfinx = lambd2_sol[::-1]
+                u_values = u.eval(point, colliding_cells[0])
+
+                self.lam_2[b, k - 1, :] = self.x[b, k, :] - self.h * (grad_u_matr.T @ (u_values - self.u_d[b, k, :] + self.lam_2[b, k, :]))
 
         old_code = """for k in range(self.K):
             grad_u_dolfin = ufl.grad(u_dolf(list(x_k[k])))  # TODO: to np
@@ -174,7 +197,7 @@ class ODE:
             adj_sol_np = adj_sol_np[::-1]
             adj_sol_dolfinx = self.numpy_to_dolfin(adj_sol_np, self.mesh, 3)  # TODO: to dolfinx
             self.sol.append(adj_sol_dolfinx)"""
-        return self.adj_sol_dolfinx
+        return self.lam_2
 
     def dolfinx_to_numpy(self, point, func):
         func_dim = func.ufl_shape
