@@ -13,3 +13,4 @@ gmesh
 vistex
 multiphenicsx
 sympy
+scifem

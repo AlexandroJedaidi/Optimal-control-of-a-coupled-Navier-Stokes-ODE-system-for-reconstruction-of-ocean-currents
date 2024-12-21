@@ -10,7 +10,7 @@ from dolfinx.fem.petsc import (apply_lifting, assemble_matrix, assemble_vector,
                                create_vector, create_matrix, set_bc)
 from dolfinx import log
 from dolfinx.fem import (Constant, Function, functionspace,
-                         assemble_scalar, dirichletbc, form, locate_dofs_topological, set_bc, form)
+                         assemble_scalar, dirichletbc, form, locate_dofs_topological, set_bc)
 from petsc4py import PETSc
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
@@ -18,6 +18,7 @@ from mpi4py import MPI
 import numpy as np
 import scipy as sc
 from basix.ufl import element, mixed_element
+import scifem
 
 
 def petsc_matrix_to_numpy(mat):
@@ -79,23 +80,22 @@ class NavierStokes:
         W_el = mixed_element([U_el, P_el])
         self.W = functionspace(self.mesh, W_el)
 
-
     def set_boundary_conditions(self):
         self.dx = ufl.Measure('dx', domain=self.mesh)
         self.ds = ufl.Measure("ds", subdomain_id=self.inlet_marker)
-        U, _ = self.W.sub(0).collapse()
+        self.U, _ = self.W.sub(0).collapse()
 
         def nonslip(x):
             values = np.zeros((2, x.shape[1]))
             return values
 
-        u_nonslip = Function(U)
+        u_nonslip = Function(self.U)
         u_nonslip.interpolate(nonslip)
 
-        wall_dofs = locate_dofs_topological((self.W.sub(0), U), self.fdim, self.ft.find(self.wall_marker))
+        wall_dofs = locate_dofs_topological((self.W.sub(0), self.U), self.fdim, self.ft.find(self.wall_marker))
         bcu_wall = dirichletbc(u_nonslip, wall_dofs, self.W.sub(0))
 
-        outlet_dofs = locate_dofs_topological((self.W.sub(0), U), self.fdim, self.ft.find(self.outlet_marker))
+        outlet_dofs = locate_dofs_topological((self.W.sub(0), self.U), self.fdim, self.ft.find(self.outlet_marker))
         bcu_outlet = dirichletbc(u_nonslip, outlet_dofs, self.W.sub(0))
         self.bcu = [bcu_wall, bcu_outlet]
 
@@ -106,7 +106,7 @@ class NavierStokes:
         self.v, self.pr = TestFunctions(self.W)
 
         self.w_adj = Function(self.W)
-        self.u_adj, self.p_adj = ufl.split(self.w_adj)
+        self.u_adj, self.p_adj = TrialFunctions(self.W)
         self.v_adj, self.pr_adj = TestFunctions(self.W)
 
     def set_state_equations(self, q):
@@ -115,14 +115,13 @@ class NavierStokes:
         b = inner(self.p, div(self.v)) * self.dx
         div_ = inner(self.pr, div(self.u)) * self.dx
         c = inner(dot(self.u, nabla_grad(self.u)), self.v) * self.dx
-        f_ = inner(f, self.v) * self.dx + inner(q, self.v) * self.ds  #TODO: control here
+        f_ = inner(f, self.v) * self.dx + inner(q, self.v) * self.ds  # TODO: control here
 
         F = a + c + div_ - b - f_
         return F
 
     def state_solving_step(self, q):
         F = self.set_state_equations(q)
-        self.w_s = Function(self.W)
         problem = NonlinearProblem(F, self.w, bcs=self.bcu)
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
         solver.convergence_criterion = "incremental"
@@ -142,38 +141,116 @@ class NavierStokes:
         n, converged = solver.solve(self.w)
         assert (converged)
         print(f"Number of interations: {n:d}")
-        return self.w
+        return self.w, self.W
 
     def set_adjoint_equation(self, u, lam_2, x, h, N, u_d):
         a = self.viscosity * inner(grad(self.u_adj), grad(self.v_adj)) * self.dx
-        c = (inner(dot(u, nabla_grad(self.v_adj)), self.u_adj) + inner(dot(self.v_adj, nabla_grad(u)), self.u_adj)) * self.dx
+        c = (inner(dot(u, nabla_grad(self.v_adj)), self.u_adj) + inner(dot(self.v_adj, nabla_grad(u)),
+                                                                       self.u_adj)) * self.dx
         b_form = inner(self.pr_adj, div(self.u_adj)) * self.dx
         div_ = inner(self.p_adj, div(self.v_adj)) * self.dx
+        lhs_ = a + c + div_ - b_form
 
-        sum_1 = 0
-        sum_2 = 0
+        b = Function(self.W)
+        b.x.array[:] = 0
+
+        u_adj_func, _ = self.w.split()
+
         bb_tree = dolfinx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
-        W = dolfinx.fem.functionspace(self.mesh, ("Lagrange", 1, (self.mesh.geometry.dim,)))
-        W_test = dolfinx.fem.functionspace(self.mesh, ("Lagrange", 1, (self.mesh.geometry.dim,)))
-        v_func = Function(W_test)
-        v_func.interpolate(self.v_adj)
-        u_adj_func = self.v_adj
-        for b in range(self.K):
-            for k in range(0, N):
-                point = np.array([x[b, k, :][0].item(), x[b, k, :][1].item(), 0])
-                cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, point)
-                colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates, point).array
-                if len(colliding_cells) == 0:
-                    print("no colliding cells")
-                    from IPython import embed
-                    embed()
+        zeros = np.zeros((*x.shape[:2], 1))
+        new_points = np.concatenate((x, zeros), axis=-1)
 
-                from IPython import embed; embed()
-                delta_u_values = u_adj_func.eval(point, colliding_cells[0])
-                sum_1 += lam_2[b, k, :] @ delta_u_values
+        point_shape = new_points.shape
+        new_points = new_points.reshape(point_shape[0] * point_shape[1], point_shape[2])
 
-                u_values = u.eval(point, colliding_cells[0])
-                sum_2 += (u_values - u_d[b, k, :]) @ delta_u_values
+        cells = []
+        points_on_proc = []
+        cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, new_points)
+        colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates,
+                                                                   new_points)
+        for i, point in enumerate(new_points):
+            if len(colliding_cells.links(i)) > 0:
+                points_on_proc.append(point)
+                cells.append(colliding_cells.links(i)[0])
+        delta_u_values = u_adj_func.eval(points_on_proc, cells)
+        # for t in range(N):
+        #     print("time" + str(t))
+        #     point = new_points[buoy, t, :]
+        #     gamma = u_d[buoy, t, :] - delta_u_values[t] - lam_2[buoy, t, :]
+        #     ps1 = scifem.PointSource(U.sub(0), point, magnitude=gamma[0])
+        #     ps2 = scifem.PointSource(self.W.sub(1), point, magnitude=gamma[1])
+        #     ps1.apply_to_vector(b)
+        #     ps2.apply_to_vector(b)
+        # point_source = scifem.PointSource(self.W.sub(0), point, magnitude=gamma)
+        # point_source.apply_to_vector(b)
+        ud = u_d.reshape(u_d.shape[0] * u_d.shape[1], u_d.shape[2])
+        lam2 = lam_2.reshape(lam_2.shape[0] * lam_2.shape[1], lam_2.shape[2])
+        gamma = ud - delta_u_values - lam2
+        ps1 = scifem.PointSource(self.U.sub(0), new_points, magnitude=gamma[:,0])  # gamma[:,0])    TODO:fix magnitude
+        ps2 = scifem.PointSource(self.U.sub(1), new_points, magnitude=gamma[:,1])  # gamma[:, 1])
+        ps1.apply_to_vector(b)
+        ps2.apply_to_vector(b)
+        # for buoy in range(self.K):
+        #     cells = []
+        #     points_on_proc = []
+        #     cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, new_points[buoy, :, :])
+        #     colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates,
+        #                                                                new_points[buoy, :, :])
+        #     for i, point in enumerate(new_points[buoy, :, :]):
+        #         if len(colliding_cells.links(i)) > 0:
+        #             points_on_proc.append(point)
+        #             cells.append(colliding_cells.links(i)[0])
+        #     delta_u_values = u_adj_func.eval(points_on_proc, cells)
+        #     # for t in range(N):
+        #     #     print("time" + str(t))
+        #     #     point = new_points[buoy, t, :]
+        #     #     gamma = u_d[buoy, t, :] - delta_u_values[t] - lam_2[buoy, t, :]
+        #     #     ps1 = scifem.PointSource(U.sub(0), point, magnitude=gamma[0])
+        #     #     ps2 = scifem.PointSource(self.W.sub(1), point, magnitude=gamma[1])
+        #     #     ps1.apply_to_vector(b)
+        #     #     ps2.apply_to_vector(b)
+        #     # point_source = scifem.PointSource(self.W.sub(0), point, magnitude=gamma)
+        #     # point_source.apply_to_vector(b)
+        #     gamma = u_d[buoy, :, :] - delta_u_values - lam_2[buoy, :, :]
+        #     ps1 = scifem.PointSource(self.U, new_points[buoy, :, :], magnitude=h)  # gamma[:,0])    TODO:fix magnitude
+        #     ps2 = scifem.PointSource(self.U, new_points[buoy, :, :], magnitude=h)  # gamma[:, 1])
+        #     ps1.apply_to_vector(b)
+        #     ps2.apply_to_vector(b)
+
+        # dofs = self.W.dofmap.cell_dofs(cells[1])
+        # print(b.x.array[dofs])
+        lhs_form = form(lhs_)
+        apply_lifting(b.x.petsc_vec, [lhs_form], [self.bcu])
+        b.x.scatter_reverse(dolfinx.la.InsertMode.add)
+        dolfinx.fem.petsc.set_bc(b.x.petsc_vec, self.bcu)
+        b.x.scatter_forward()
+        A = dolfinx.fem.petsc.assemble_matrix(lhs_form, bcs=self.bcu)
+        A.assemble()
+
+        # sum_1 = 0
+        # sum_2 = 0
+        # bb_tree = dolfinx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
+        # W = dolfinx.fem.functionspace(self.mesh, ("Lagrange", 1, (self.mesh.geometry.dim,)))
+        # W_test = dolfinx.fem.functionspace(self.mesh, ("Lagrange", 1, (self.mesh.geometry.dim,)))
+        # v_func = Function(W_test)
+        # v_func.interpolate(self.v_adj)
+        # u_adj_func = self.v_adj
+        # for b in range(self.K):
+        #     for k in range(0, N):
+        #         point = np.array([x[b, k, :][0].item(), x[b, k, :][1].item(), 0])
+        #         cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, point)
+        #         colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates, point).array
+        #         if len(colliding_cells) == 0:
+        #             print("no colliding cells")
+        #             from IPython import embed
+        #             embed()
+        #
+        #         from IPython import embed; embed()
+        #         delta_u_values = u_adj_func.eval(point, colliding_cells[0])
+        #         sum_1 += lam_2[b, k, :] @ delta_u_values
+        #
+        #         u_values = u.eval(point, colliding_cells[0])
+        #         sum_2 += (u_values - u_d[b, k, :]) @ delta_u_values
 
         # constant_sums = Constant(self.mesh,PETSc.ScalarType(h*sum_1 + h*sum_2))
         # constant_expr = dolfinx.fem.Expression(constant_sums, W.element.interpolation_points())
@@ -181,31 +258,42 @@ class NavierStokes:
         # constant_func.interpolate(constant_expr)
         # from IPython import embed
         # embed()
-        F = a + c + div_ - b_form + inner(Constant(self.mesh, sum_1 + sum_2), self.pr_adj) * self.dx
-        return F
+        # F = a + c + div_ - b_form
+        return A, b
 
     def adjoint_state_solving_step(self, u, lam_2, x, h, N, u_d):
-        F_adj = self.set_adjoint_equation(u, lam_2, x, h, N, u_d)
-        problem = NonlinearProblem(F_adj, self.w_adj, bcs=self.bcu)
-        solver = NewtonSolver(MPI.COMM_WORLD, problem)
-        solver.convergence_criterion = "incremental"
-        solver.rtol = 1e-6
-        solver.report = True
-        ksp = solver.krylov_solver
-        opts = PETSc.Options()
-        option_prefix = ksp.getOptionsPrefix()
-        opts[f"{option_prefix}ksp_type"] = "gmres"
-        opts[f"{option_prefix}ksp_rtol"] = 1.0e-8
-        opts[f"{option_prefix}pc_type"] = "hypre"
-        opts[f"{option_prefix}pc_hypre_type"] = "boomeramg"
-        opts[f"{option_prefix}pc_hypre_boomeramg_max_iter"] = 1
-        opts[f"{option_prefix}pc_hypre_boomeramg_cycle_type"] = "v"
-        ksp.setFromOptions()
-        log.set_log_level(log.LogLevel.INFO)
-        n, converged = solver.solve(self.w_adj)
-        assert (converged)
-        print(f"Number of interations: {n:d}")
-        return self.w_adj
+        A, rhs = self.set_adjoint_equation(u, lam_2, x, h, N, u_d)
+        ksp = PETSc.KSP().create(self.mesh.comm)
+        ksp.setOperators(A)
+        ksp.setType(PETSc.KSP.Type.PREONLY)
+        ksp.getPC().setType(PETSc.PC.Type.LU)
+        ksp.getPC().setFactorSolverType("mumps")
+        up = dolfinx.fem.Function(self.W)
+        ksp.solve(rhs.x.petsc_vec, up.x.petsc_vec)
+        up.x.scatter_forward()
+
+        # F_adj = self.set_adjoint_equation(u, lam_2, x, h, N, u_d)
+        # problem = NonlinearProblem(F_adj, self.w_adj, bcs=self.bcu)
+        # solver = NewtonSolver(MPI.COMM_WORLD, problem)
+        # solver.convergence_criterion = "incremental"
+        # solver.rtol = 1e-6
+        # solver.report = True
+        # ksp = solver.krylov_solver
+        # opts = PETSc.Options()
+        # option_prefix = ksp.getOptionsPrefix()
+        # opts[f"{option_prefix}ksp_type"] = "gmres"
+        # opts[f"{option_prefix}ksp_rtol"] = 1.0e-8
+        # opts[f"{option_prefix}pc_type"] = "hypre"
+        # opts[f"{option_prefix}pc_hypre_type"] = "boomeramg"
+        # opts[f"{option_prefix}pc_hypre_boomeramg_max_iter"] = 1
+        # opts[f"{option_prefix}pc_hypre_boomeramg_cycle_type"] = "v"
+        # ksp.setFromOptions()
+        # log.set_log_level(log.LogLevel.INFO)
+        # n, converged = solver.solve(self.w_adj)
+        # assert (converged)
+        # print(f"Number of interations: {n:d}")
+        # return self.w_adj
+        return up
 
     def save_vector_fields(self):
         with dolfinx.io.VTXWriter(MPI.COMM_WORLD, self.np_path + f"{self.experiment_number}_pressure.bp", [self.w_s],
@@ -238,7 +326,6 @@ class NavierStokes:
         #     for l2 in lam_2[b, :, :]:
         #         F += l2*self.v_adj * ds
         #     #line_integral_1 += lam_2[b, :, :] * self.v_adj * ds
-
 
         # a_form = form(a)
         # K = create_matrix(a_form)
