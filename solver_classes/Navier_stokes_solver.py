@@ -143,7 +143,7 @@ class NavierStokes:
         print(f"Number of interations: {n:d}")
         return self.w, self.W
 
-    def set_adjoint_equation(self, u, lam_2, x, h, N, u_d):
+    def set_adjoint_equation(self, u, lam_2, x, h, N, u_d, q):
         a = self.viscosity * inner(grad(self.u_adj), grad(self.v_adj)) * self.dx
         c = (inner(dot(u, nabla_grad(self.v_adj)), self.u_adj) + inner(dot(self.v_adj, nabla_grad(u)),
                                                                        self.u_adj)) * self.dx
@@ -186,8 +186,8 @@ class NavierStokes:
         ud = u_d.reshape(u_d.shape[0] * u_d.shape[1], u_d.shape[2])
         lam2 = lam_2.reshape(lam_2.shape[0] * lam_2.shape[1], lam_2.shape[2])
         gamma = ud - delta_u_values - lam2
-        ps1 = scifem.PointSource(self.U.sub(0), new_points, magnitude=gamma[:,0])  # gamma[:,0])    TODO:fix magnitude
-        ps2 = scifem.PointSource(self.U.sub(1), new_points, magnitude=gamma[:,1])  # gamma[:, 1])
+        ps1 = scifem.PointSource(self.U.sub(0), new_points, magnitude=h*gamma[:,0])  # gamma[:,0])    TODO:fix magnitude
+        ps2 = scifem.PointSource(self.U.sub(1), new_points, magnitude=h*gamma[:,1])  # gamma[:, 1])
         ps1.apply_to_vector(b)
         ps2.apply_to_vector(b)
         # for buoy in range(self.K):
@@ -259,10 +259,13 @@ class NavierStokes:
         # from IPython import embed
         # embed()
         # F = a + c + div_ - b_form
-        return A, b
+        dofs_q = locate_dofs_topological(self.U, self.fdim, self.ft.find(self.inlet_marker))
+        q_array = q.x.array[dofs_q]
+        J = 0.5 *sum(h*(np.linalg.norm(delta_u_values -ud, axis=1)**2)) + 0.5*(np.linalg.norm(q_array)**2)
+        return A, b, J
 
-    def adjoint_state_solving_step(self, u, lam_2, x, h, N, u_d):
-        A, rhs = self.set_adjoint_equation(u, lam_2, x, h, N, u_d)
+    def adjoint_state_solving_step(self, u, lam_2, x, h, N, u_d, q):
+        A, rhs, J = self.set_adjoint_equation(u, lam_2, x, h, N, u_d, q)
         ksp = PETSc.KSP().create(self.mesh.comm)
         ksp.setOperators(A)
         ksp.setType(PETSc.KSP.Type.PREONLY)
@@ -293,7 +296,7 @@ class NavierStokes:
         # assert (converged)
         # print(f"Number of interations: {n:d}")
         # return self.w_adj
-        return up
+        return up, J
 
     def save_vector_fields(self):
         with dolfinx.io.VTXWriter(MPI.COMM_WORLD, self.np_path + f"{self.experiment_number}_pressure.bp", [self.w_s],
