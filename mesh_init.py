@@ -44,11 +44,9 @@ def create_mesh(gdim):
         boundaries = gmsh.model.getBoundary(volumes, oriented=False)
         for boundary in boundaries:
             center_of_mass = gmsh.model.occ.getCenterOfMass(boundary[0], boundary[1])
-            if np.allclose(center_of_mass, [0, H / 2, 0]):
+            if np.allclose(center_of_mass, [0, H / 2, 0]) or np.allclose(center_of_mass, [L, H / 2, 0]):
                 inflow.append(boundary[1])
-            elif np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass,
-                                                                           [L / 2, 0, 0]) or np.allclose(center_of_mass,
-                                                                                                         [L, H / 2, 0]):
+            elif np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass, [L / 2, 0, 0]):
                 walls.append(boundary[1])
         # from IPython import embed
         # embed()
@@ -94,9 +92,9 @@ def create_mesh(gdim):
     return mesh, ft, inlet_marker, wall_marker
 
 
-def create_pipe_mesh(gdim, obst=False):
-    L = 2.2
-    H = 0.41
+def create_pipe_mesh(gdim, print_mesh_data=False, obst=False):
+    L = 2
+    H = 2
     c_x = c_y = 0.2
     r = 0.05
 
@@ -119,17 +117,17 @@ def create_pipe_mesh(gdim, obst=False):
         gmsh.model.addPhysicalGroup(volumes[0][0], [volumes[0][1]], fluid_marker)
         gmsh.model.setPhysicalName(volumes[0][0], fluid_marker, "Fluid")
 
-    inlet_marker, outlet_marker, wall_marker, obstacle_marker = 2, 3, 4, 5
+    inlet_marker, outlet_marker, wall_marker, obstacle_marker = 0, 10, 50, 100
     inflow, outflow, walls, obstacle = [], [], [], []
     if mesh_comm.rank == model_rank:
         boundaries = gmsh.model.getBoundary(volumes, oriented=False)
         for boundary in boundaries:
             center_of_mass = gmsh.model.occ.getCenterOfMass(boundary[0], boundary[1])
-            if np.allclose(center_of_mass, [0, H / 2, 0]):
+            if np.allclose(center_of_mass, [0, H / 2, 0]) or np.allclose(center_of_mass, [L, H / 2, 0]):
                 inflow.append(boundary[1])
-            elif np.allclose(center_of_mass, [L, H / 2, 0]):
-                outflow.append(boundary[1])
-            elif np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass, [L / 2, 0, 0]):
+            # elif np.allclose(center_of_mass, [L, H / 2, 0]):
+            #     outflow.append(boundary[1])
+            elif np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass, [L / 2, 0, 0]) :
                 walls.append(boundary[1])
             else:
                 obstacle.append(boundary[1])
@@ -175,5 +173,22 @@ def create_pipe_mesh(gdim, obst=False):
 
     mesh, _, ft = gmshio.model_to_mesh(gmsh.model, mesh_comm, model_rank, gdim=gdim)
     ft.name = "Facet markers"
-    gmsh.write("mesh.msh")
-    return mesh, ft, inlet_marker, wall_marker, outlet_marker
+
+    boundary = gmsh.model.getBoundary(gmsh.model.getEntities(2))
+    inlet_boundary = boundary[-1]
+    nodeTags, coord, parametricCoord = gmsh.model.mesh.getNodes(inlet_boundary[0], inlet_boundary[1],
+                                                                includeBoundary=True)
+    inlet_coord = np.reshape(coord, (len(coord) // 3, 3))
+
+    right_boundary = boundary[1]
+    nodeTags_r, coord_r, parametricCoord_r = gmsh.model.mesh.getNodes(right_boundary[0], right_boundary[1],
+                                                                includeBoundary=True)
+    right_coord = np.reshape(coord_r, (len(coord_r) // 3, 3))
+
+    if print_mesh_data is True:
+        gmsh.write("mesh.msh")
+        with dolfinx.io.XDMFFile(mesh.comm, "mesh_data/ft.xdmf", "w") as xdmf:
+            xdmf.write_mesh(mesh)
+            xdmf.write_meshtags(ft, mesh.geometry)
+
+    return mesh, ft, inlet_marker, wall_marker, outlet_marker, inlet_coord, right_coord
