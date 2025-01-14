@@ -86,7 +86,7 @@ class ODE:
         self.x = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
         # self.x[:, 0, 0] = np.array([random.uniform(self.mesh_boundary_x[0], self.mesh_boundary_x[1]) for _ in range(self.K)])
         # self.x[:, 0, 0] = np.array([random.uniform(self.mesh_boundary_x[0], self.mesh_boundary_x[1]) for _ in range(self.K)])
-        self.x[:, 0, 0] = np.array([0.5 for _ in range(self.K)])
+        self.x[:, 0, 0] = np.array([0.1 for _ in range(self.K)])
         self.x[:, 0, 1] = np.array([0.5 for _ in range(self.K)])
 
 
@@ -94,11 +94,12 @@ class ODE:
 
         self.u_d = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
 
-    def ode_solving_step(self, u, iter):
+    def ode_solving_step(self, u):
         # explicit euler
         bb_tree = dolfinx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
         for b in range(self.K):
             for k, t_k in enumerate(self.time_interval[:-1]):
+                print("time: " + str(t_k))
                 point = np.array([self.x[b, k, :][0].item(), self.x[b, k, :][1].item(), 0])
                 cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, point)
                 colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates, point).array
@@ -107,21 +108,15 @@ class ODE:
                     print("buoy number: " + str(b))
                     print("original coordinate: " + str(self.x[b, 0, :][0].item()) + " " + str(self.x[b, 0, :][1].item()))
                     print("actual coordinate: " + str(point))
-                    with dolfinx.io.XDMFFile(self.mesh.comm, f"{self.debug_path}/paraview/u_failed.xdmf", "w") as file:
-                        file.write_mesh(self.mesh)
-                        file.write_function(u)
                     exit(0)
                 u_values = u.eval(point, colliding_cells[0])
                 self.x[b, k + 1, :] = self.x[b, k, :] + self.h * u_values
-        with dolfinx.io.XDMFFile(self.mesh.comm, f"{self.debug_path}/paraview/u_success_on_iter_{str(iter)}.xdmf", "w") as file:
-            file.write_mesh(self.mesh)
-            file.write_function(u)
         return self.x
 
     def adjoint_ode_solving_step(self, u):
         grad_u = ufl.grad(u)
         U_grad_fp = dolfinx.fem.functionspace(self.mesh,
-                                              ("Lagrange", 1, (self.mesh.geometry.dim, self.mesh.geometry.dim)))
+                                              ("Lagrange", 2, (self.mesh.geometry.dim, self.mesh.geometry.dim)))
         u_grad_expr = dolfinx.fem.Expression(grad_u, U_grad_fp.element.interpolation_points())
         u_grad_fct = dolfinx.fem.Function(U_grad_fp)
         u_grad_fct.interpolate(u_grad_expr)
@@ -137,6 +132,7 @@ class ODE:
                     from IPython import embed
                     embed()
                 grad_u_values = u_grad_fct.eval(point, colliding_cells[0])
+                from IPython import embed; embed()
                 grad_u_matr = np.array([[grad_u_values[0].item(), grad_u_values[1].item()],
                                         [grad_u_values[2].item(), grad_u_values[3].item()]])
 

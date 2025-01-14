@@ -150,6 +150,7 @@ class PointSource:
         unrolled_dofs = unroll_dofmap(_dofs, self._function_space.dofmap.bs)
         i=0
         for dofs, values in zip(unrolled_dofs, self._basis_values, strict=True):
+            #from IPython import embed; embed()
             if isinstance(b, dolfinx.fem.Function):
                 b.x.array[dofs] += values * self._magnitude[i]
             elif isinstance(b, dolfinx.la.Vector):
