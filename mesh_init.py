@@ -127,7 +127,7 @@ def create_pipe_mesh(gdim, print_mesh_data=False, obst=False):
                 inflow.append(boundary[1])
             # elif np.allclose(center_of_mass, [L, H / 2, 0]):
             #     outflow.append(boundary[1])
-            elif np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass, [L / 2, 0, 0]) :
+            elif np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass, [L / 2, 0, 0]):
                 walls.append(boundary[1])
             else:
                 obstacle.append(boundary[1])

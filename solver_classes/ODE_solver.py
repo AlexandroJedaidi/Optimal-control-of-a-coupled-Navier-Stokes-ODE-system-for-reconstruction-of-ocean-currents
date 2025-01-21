@@ -95,11 +95,12 @@ class ODE:
         self.u_d = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
 
     def ode_solving_step(self, u):
+        self.set_functions()
         # explicit euler
         bb_tree = dolfinx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
         for b in range(self.K):
             for k, t_k in enumerate(self.time_interval[:-1]):
-                print("time: " + str(t_k))
+                #print("time: " + str(t_k))
                 point = np.array([self.x[b, k, :][0].item(), self.x[b, k, :][1].item(), 0])
                 cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, point)
                 colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates, point).array
@@ -114,6 +115,7 @@ class ODE:
         return self.x
 
     def adjoint_ode_solving_step(self, u):
+        self.set_functions()
         grad_u = ufl.grad(u)
         U_grad_fp = dolfinx.fem.functionspace(self.mesh,
                                               ("Lagrange", 2, (self.mesh.geometry.dim, self.mesh.geometry.dim)))
@@ -132,7 +134,6 @@ class ODE:
                     from IPython import embed
                     embed()
                 grad_u_values = u_grad_fct.eval(point, colliding_cells[0])
-                from IPython import embed; embed()
                 grad_u_matr = np.array([[grad_u_values[0].item(), grad_u_values[1].item()],
                                         [grad_u_values[2].item(), grad_u_values[3].item()]])
 
@@ -140,9 +141,6 @@ class ODE:
                 A = (np.identity(2) + self.h * grad_u_matr.T)
                 b_vec = self.lam_2[b, k+1, :] - self.h * grad_u_matr.T @ (u_values - self.u_d[b, k, :])
                 self.lam_2[b, k, :] = np.linalg.solve(A, b_vec)
-
-                # self.lam_2[b, k - 1, :] = self.x[b, k, :] - self.h * (
-                #         grad_u_matr.T @ (u_values - self.u_d[b, k, :] + self.lam_2[b, k, :]))
         return self.lam_2
 
     def old_code(self):

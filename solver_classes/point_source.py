@@ -148,11 +148,11 @@ class PointSource:
         # Apply the point sources to the vector
         _dofs = self._function_space.dofmap.list[self._cells]
         unrolled_dofs = unroll_dofmap(_dofs, self._function_space.dofmap.bs)
-        i=0
         for dofs, values in zip(unrolled_dofs, self._basis_values, strict=True):
             #from IPython import embed; embed()
             if isinstance(b, dolfinx.fem.Function):
-                b.x.array[dofs] += values * self._magnitude[i]
+                for magn in self._magnitude:
+                    b.x.array[dofs] += values * magn
             elif isinstance(b, dolfinx.la.Vector):
                 b.array[dofs] += values * self._magnitude
             elif isinstance(b, PETSc.Vec):
@@ -160,5 +160,4 @@ class PointSource:
                     dofs,
                     values * self._magnitude,
                     addv=PETSc.InsertMode.ADD_VALUES,
-                )
-            i+=1
+                    )

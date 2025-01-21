@@ -40,4 +40,3 @@ grad_u_values = u_grad_fct.eval(point, colliding_cells[0])
 grad_u_matr = np.array([[grad_u_values[0].item(), grad_u_values[1].item()],
                         [grad_u_values[2].item(), grad_u_values[3].item()]])
 u_values = u.eval(point, colliding_cells[0])
-from IPython import embed; embed()

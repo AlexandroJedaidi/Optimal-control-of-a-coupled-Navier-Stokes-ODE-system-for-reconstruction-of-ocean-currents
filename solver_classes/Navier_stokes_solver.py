@@ -76,8 +76,8 @@ class NavierStokes:
         self.set_boundary_conditions()
 
     def set_function_spaces(self):
-        U_el = element("Lagrange", self.mesh.basix_cell(), 2, shape=(self.mesh.geometry.dim,))
-        P_el = element("Lagrange", self.mesh.basix_cell(), 1)
+        U_el = element("Lagrange", self.mesh.basix_cell(), 3, shape=(self.mesh.geometry.dim,))
+        P_el = element("Lagrange", self.mesh.basix_cell(), 2)
         W_el = mixed_element([U_el, P_el])
         self.W = functionspace(self.mesh, W_el)
         self.U, _ = self.W.sub(0).collapse()
@@ -136,7 +136,7 @@ class NavierStokes:
         u_dot_n = dot(self.u, FacetNormal(self.mesh))
         extra_bt = 0.5 * inner(ufl.conditional(u_dot_n < 0, u_dot_n, 0) * self.u, self.v) * self.ds(self.inlet_marker)
         f_ = inner(f, self.v) * self.dx + inner(q, self.v) * self.ds(self.inlet_marker)  # TODO: control here
-        F = a + c + div_ - b - f_ - extra_bt
+        F = a + c + div_ - b - f_ #- extra_bt
         return F
 
     def state_solving_step(self, q):
@@ -171,8 +171,7 @@ class NavierStokes:
         b_form = inner(self.pr_adj, div(self.u_adj)) * self.dx
         div_ = inner(self.p_adj, div(self.v_adj)) * self.dx
         lhs_ = a + c + div_ - b_form
-        bp = Function(self.W)
-        b, _ = bp.split()
+        b = Function(self.W)
         b.x.array[:] = 0
 
         bb_tree = dolfinx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
@@ -195,12 +194,12 @@ class NavierStokes:
         u_values = u.eval(points_on_proc, cells)
         ud = u_d.reshape(u_d.shape[0] * u_d.shape[1], u_d.shape[2])
         lam2 = lam_2.reshape(lam_2.shape[0] * lam_2.shape[1], lam_2.shape[2])
-        gamma = ud - u_values - lam2
-
+        gamma = -(ud - u_values - lam2)
+        #from IPython import embed; embed()
         ps1 = scifem.PointSource(self.U.sub(0), new_points, magnitude=h * gamma[:, 0])
         ps2 = scifem.PointSource(self.U.sub(1), new_points, magnitude=h * gamma[:, 1])
-        ps1.apply_to_vector(b.sub(0))
-        ps2.apply_to_vector(b.sub(1))
+        ps1.apply_to_vector(b)
+        ps2.apply_to_vector(b)
         lhs_form = form(lhs_)
         apply_lifting(b.x.petsc_vec, [lhs_form], [self.bcu])
         b.x.scatter_reverse(dolfinx.la.InsertMode.add)

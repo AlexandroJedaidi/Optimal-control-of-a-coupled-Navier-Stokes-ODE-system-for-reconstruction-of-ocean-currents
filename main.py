@@ -20,7 +20,7 @@ from basix.ufl import element, mixed_element
 import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------------------------------------------------------------------
-experiment_number = 50
+experiment_number = 52
 np_path = f"results/experiments/{experiment_number}/"
 # Discretization parameters
 with open("parameters.json", "r") as file:
@@ -36,11 +36,11 @@ with open("parameters.json", "r") as file:
     mesh_boundary_y = parameters["mesh_boundary_y"]
 
 os.mkdir(np_path)
-os.mkdir(np_path+"/vector_fields")
-os.mkdir(np_path+"/q_data")
+os.mkdir(np_path + "/vector_fields")
+os.mkdir(np_path + "/q_data")
 # ----------------------------------------------------------------------------------------------------------------------
 # parameters
-num_steps = 3
+num_steps = 1
 # ----------------------------------------------------------------------------------------------------------------------
 # Mesh
 gmsh.initialize()
@@ -51,6 +51,8 @@ mesh, ft, inlet_marker, wall_marker, outlet_marker, inlet_coord, right_coord = m
 if not dolfinx.has_petsc:
     print("This demo requires DOLFINx to be compiled with PETSc enabled.")
     exit(0)
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 # helper functions
 def eval_vector_field(grid, coordinates, func, func_name, path, vector_field=True):
@@ -78,7 +80,7 @@ def eval_vector_field(grid, coordinates, func, func_name, path, vector_field=Tru
             y_axis.append(y_)
             u_vec = func_eval[i][0]
             v_vec = func_eval[i][1]
-            plt.quiver(x_, y_, u_vec, v_vec, 1, angles="xy", scale_units="xy", scale=1, cmap="viridis")
+            plt.quiver(x_, y_, u_vec, v_vec, 1, angles="xy", scale_units="xy", scale=0.6, cmap="viridis")
         plt.savefig(f"{path}/{func_name}_vectorfield.png")
         plt.clf()
     else:
@@ -137,8 +139,8 @@ u_d = ODE_instance.u_d
 N = ODE_instance.N
 # ----------------------------------------------------------------------------------------------------------------------
 # init q
-U_el = element("Lagrange", mesh.basix_cell(), 2, shape=(mesh.geometry.dim,))
-P_el = element("Lagrange", mesh.basix_cell(), 1)
+U_el = element("Lagrange", mesh.basix_cell(), 3, shape=(mesh.geometry.dim,))
+P_el = element("Lagrange", mesh.basix_cell(), 2)
 W_el = mixed_element([U_el, P_el])
 W = functionspace(mesh, W_el)
 qp = Function(W)
@@ -152,26 +154,26 @@ dof_wall = dolfinx.fem.locate_dofs_geometrical(U,
                                                                                                  mesh_boundary_y[1]))
 
 
-# q.x.array[2 * dof_left] = 1.0
-# q.x.array[2 * dof_left + 1] = 1.0
-# q.x.array[2 * dof_right] = 0.0
-# q.x.array[2 * dof_right + 1] = 0.0
 def boundary_values(x):
     values = np.zeros((2, x.shape[1]))
     # values[0, :] = np.where(np.isclose(x[0, :], 0.0), 1.0, np.where(np.isclose(x[0, :], 2.0), 1.0, 0.0))  # x-component
     # values[1, :] = np.where(np.isclose(x[0, :], 0.0), 0.0, 0.0)  # y-component
     values[0, :] = np.where(np.isclose(x[0, :], 0.0),
-                            0.1*3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
+                            0.1 * 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
                             0.0)
     return values
 
 
 q.interpolate(boundary_values)
 
-eval_vector_field(mesh, inlet_coord, q, "initial_q_vectorfield_left_boundary", np_path+"q_data")  # plot q vector field left side
-eval_vector_field(mesh, right_coord, q, "initial_q_vectorfield_right_boundary", np_path+"q_data")  # plot q vector field right side
-eval_vector_field(mesh, inlet_coord, q, "initial_q_vectorfield_left_boundary", np_path+"q_data", False) # plot q left side as side profile
-eval_vector_field(mesh, right_coord, q, "initial_q_vectorfield_right_boundary", np_path+"q_data", False) # plot q left side as side profile
+eval_vector_field(mesh, inlet_coord, q, "initial_q_vectorfield_left_boundary",
+                  np_path + "q_data")  # plot q vector field left side
+eval_vector_field(mesh, right_coord, q, "initial_q_vectorfield_right_boundary",
+                  np_path + "q_data")  # plot q vector field right side
+eval_vector_field(mesh, inlet_coord, q, "initial_q_vectorfield_left_boundary", np_path + "q_data",
+                  False)  # plot q left side as side profile
+eval_vector_field(mesh, right_coord, q, "initial_q_vectorfield_right_boundary", np_path + "q_data",
+                  False)  # plot q left side as side profile
 # ----------------------------------------------------------------------------------------------------------------------
 # init plotting arrays
 q_abs = []
@@ -181,19 +183,84 @@ q_gamma_2 = []
 x_array = []
 grad_j_np = []
 u_array = []
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def evalutate_fuct(fct, points):
+    bb_tree = dolfinx.geometry.bb_tree(mesh, mesh.topology.dim)
+    zeros = np.zeros((*points.shape[:2], 1))
+    new_points = np.concatenate((points, zeros), axis=-1)
+
+    point_shape = new_points.shape
+    new_points = new_points.reshape(point_shape[0] * point_shape[1], point_shape[2])
+
+    cells = []
+    points_on_proc = []
+    cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, new_points)
+    colliding_cells = dolfinx.geometry.compute_colliding_cells(mesh, cell_candidates,
+                                                               new_points)
+    for i, point in enumerate(new_points):
+        if len(colliding_cells.links(i)) > 0:
+            points_on_proc.append(point)
+            cells.append(colliding_cells.links(i)[0])
+
+    return fct.eval(points_on_proc, cells)
+
+
+def test_gradient(lam_, q_func, u_red, x_red):
+    ds_ = ufl.Measure("ds", subdomain_data=ft)
+    dx_ = ufl.Measure('dx', domain=mesh)
+    dq, _ = Function(W).split()
+    dq.x.array[:] = 1
+    h_ = np.array([10 ** -(i + 1) for i in range(14)])
+
+    grad_j_funcp = Function(W)
+    grad_j_func, _ = grad_j_funcp.split()
+    grad_j_func.x.array[:] = alpha * q_func.x.array[:] - lam_.x.array[:]
+    red_grad = form(dot(grad_j_func, dq) * ds_(inlet_marker))
+    comm_red = dq.function_space.mesh.comm
+    J_grad_red = comm_red.allreduce(assemble_scalar(red_grad), MPI.SUM)
+
+    ud = u_d.reshape(u_d.shape[0] * u_d.shape[1], u_d.shape[2])
+    u_values_red = evalutate_fuct(u_red, x_red)
+    qnorm = form(dot(q_func, q_func) * ds_(inlet_marker))
+    comm = q_func.function_space.mesh.comm
+    E = comm.allreduce(assemble_scalar(qnorm), MPI.SUM)
+    J_red = 0.5 * h*sum((np.linalg.norm(u_values_red - ud, axis=1) ** 2)) + (alpha / 2) * E
+
+    dJ = []
+    for h_i in h_:
+        qhat,_ = Function(W).split()
+        qhat.x.array[:] = q_func.x.array[:] + h_i * dq.x.array[:]
+        w_, W_ = NS_instance.state_solving_step(qhat)
+        u_, p_ = w_.split()
+        x_ = ODE_instance.ode_solving_step(u_)
+
+        qnorm = form(dot(qhat, qhat) * ds_(inlet_marker))
+        comm = qhat.function_space.mesh.comm
+        E = comm.allreduce(assemble_scalar(qnorm), MPI.SUM)
+
+        u_values_ = evalutate_fuct(u_, x_)
+
+        dJ.append((0.5 * h * sum((np.linalg.norm(u_values_ - ud, axis=1) ** 2)) + (alpha / 2) * E - J_red) / h_i)
+
+    with open(np_path + "grad_J_error.txt", "w") as text_file:
+        text_file.write("reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
+        for i, h_i in enumerate(h_[:-1]):
+            text_file.write(f" {J_grad_red} \t {dJ[i]} \t {dJ[i] - J_grad_red} \t {h_i} \n")
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 # optimization loop
 for i in range(num_steps):
     q_gamma_1.append(sum(q.x.array[dof_left]) + sum(q.x.array[dof_right]))
     q_gamma_2.append(sum(q.x.array[dof_wall]))
-    # if NS_instance.u is not None:
-    #     eval_vector_field(mesh, grid_array, NS_instance.w, f"u_vectorfield_{str(i)}_BEFORE_ITERATION",
-    #                       np_path + "vector_fields")  # plot vector fields
 
     w, W = NS_instance.state_solving_step(q)  # step one
 
     u, p = w.split()
-    eval_vector_field(mesh, grid_array, u, f"u_vectorfield_{str(i)}_AFTER_ITERATION", np_path+"vector_fields")  # plot vector fields
+    eval_vector_field(mesh, grid_array, u, f"u_vectorfield_{str(i)}_AFTER_ITERATION",
+                      np_path + "vector_fields")  # plot vector fields
 
     x = ODE_instance.ode_solving_step(u)  # step two
     lam_2 = ODE_instance.adjoint_ode_solving_step(u)  # step three
@@ -201,9 +268,12 @@ for i in range(num_steps):
 
     u_adj, p_adj = w_adj.split()
 
-    grad_j = q.x.array - u_adj.x.array
+    test_gradient(u_adj, q, u, x)
+
+    grad_j = q.x.array[:] - u_adj.x.array[:]
     grad_j_np.append(np.linalg.norm(grad_j))
-    q.x.array[:] = q.x.array - mu * (alpha * q.x.array - u_adj.x.array)
+
+    q.x.array[:] = q.x.array[:] - mu * (alpha * q.x.array[:] - u_adj.x.array[:])
 
     q_abs.append(sum(q.x.array))
     J_array.append(J)
@@ -241,30 +311,13 @@ plt.clf()
 #
 # plt.clf()
 
-# import matplotlib.animation as animation
-# fig, ax = plt.subplots()
-# ax.set_xlim([0, 2])
-# ax.set_ylim([0, 2])
-#
-# scat = ax.scatter(1, 0)
-# x = np.linspace(0, 10)
-#
-#
-# def animate(i):
-#     scat.set_offsets((x[i], 0))
-#     return (scat,)
-#
-#
-# ani = animation.FuncAnimation(fig, animate, repeat=True, frames=len(x) - 1, interval=50)
-# writer = animation.PillowWriter(fps=15,
-#                                 metadata=dict(artist='Me'),
-#                                 bitrate=1800)
-# ani.save('scatter.gif', writer=writer)
-os.mkdir(np_path+"/buoy_movements")
+os.mkdir(np_path + "/buoy_movements")
 for k, x_ in enumerate(x_array):
-    for i,x_buoy in enumerate(x_):
+    for i, x_buoy in enumerate(x_):
         x_coord = x_buoy[:, 0]
         y_coord = x_buoy[:, 1]
+        plt.xlim(0,2)
+        plt.ylim(0,2)
         plt.plot(x_coord, y_coord, label=f"buoy_{i}_movement", **{'color': 'lightsteelblue', 'marker': 'o'})
         plt.savefig(f"{np_path}buoy_movements/buoy_{i}_{k}_movement.png")
         plt.clf()
@@ -280,12 +333,14 @@ plt.savefig(f"{np_path}buoy_0_velocity_error.png")
 plt.clf()
 
 # print inlet velocity field
-eval_vector_field(mesh, inlet_coord, q, "final_q_vectorfield_left_boundary", np_path+"q_data")
-eval_vector_field(mesh, right_coord, q, "final_q_vectorfield_right_boundary", np_path+"q_data")
-eval_vector_field(mesh, inlet_coord, q, "final_q_vectorfield_left_boundary", np_path+"q_data",  False) # plot q left side as side profile
-eval_vector_field(mesh, right_coord, q, "final_q_vectorfield_right_boundary", np_path+"q_data", False) # plot q left side as side profile
+eval_vector_field(mesh, inlet_coord, q, "final_q_vectorfield_left_boundary", np_path + "q_data")
+eval_vector_field(mesh, right_coord, q, "final_q_vectorfield_right_boundary", np_path + "q_data")
+eval_vector_field(mesh, inlet_coord, q, "final_q_vectorfield_left_boundary", np_path + "q_data",
+                  False)  # plot q left side as side profile
+eval_vector_field(mesh, right_coord, q, "final_q_vectorfield_right_boundary", np_path + "q_data",
+                  False)  # plot q left side as side profile
 
-eval_vector_field(mesh, grid_array, u, "final_u_vectorfield",np_path+"vector_fields")
+eval_vector_field(mesh, grid_array, u, "final_u_vectorfield", np_path + "vector_fields")
 
 # write vector field for paraview
 # with dolfinx.io.XDMFFile(mesh.comm, f"{np_path}/paraview/u_final.xdmf", "w") as file:
