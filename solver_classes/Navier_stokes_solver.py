@@ -70,6 +70,7 @@ class NavierStokes:
             self.alpha = parameters["alpha"]
             self.mesh_boundary_x = parameters["mesh_boundary_x"]
             self.mesh_boundary_y = parameters["mesh_boundary_y"]
+            self.delta = parameters["delta"]
 
         self.set_function_spaces()
         self.set_functions()
@@ -85,6 +86,7 @@ class NavierStokes:
     def set_boundary_conditions(self):
         self.dx = ufl.Measure('dx', domain=self.mesh)
         self.ds = ufl.Measure("ds", subdomain_data=self.ft)
+
         # class InletVelocity():
         #     def __init__(self):
         #         self.t = 1
@@ -121,12 +123,13 @@ class NavierStokes:
         self.v, self.pr = ufl.split(TestFunction(self.W))
 
         self.w_adj = Function(self.W)
-        # self.u_adj, self.p_adj = ufl.split(self.w_adj)
-        # self.v_adj, self.pr_adj = ufl.split(TestFunction(self.W))
         self.u_adj, self.p_adj = TrialFunctions(self.W)
         self.v_adj, self.pr_adj = TestFunctions(self.W)
 
-    def set_state_equations(self, q):
+        self.u_r, self.p_r = TrialFunctions(self.W)
+        self.v_r, self.pr_r = TestFunctions(self.W)
+
+    def set_state_equations(self, q, u_r):
         self.set_functions()
         f = Constant(self.mesh, PETSc.ScalarType((0, 0)))
         a = self.viscosity * inner(grad(self.u), grad(self.v)) * self.dx
@@ -134,13 +137,14 @@ class NavierStokes:
         div_ = inner(self.pr, div(self.u)) * self.dx
         c = inner(dot(self.u, nabla_grad(self.u)), self.v) * self.dx
         u_dot_n = dot(self.u, FacetNormal(self.mesh))
-        extra_bt = 0.5 * inner(ufl.conditional(u_dot_n < 0, u_dot_n, 0) * self.u, self.v) * self.ds(self.inlet_marker)
+        psi_delta = 0.5 * (u_dot_n * ufl.tanh(u_dot_n / self.delta) - u_dot_n + self.delta)
+        extra_bt = 0.5 * inner(psi_delta * self.u - u_r, self.v) * self.ds(self.inlet_marker)
         f_ = inner(f, self.v) * self.dx + inner(q, self.v) * self.ds(self.inlet_marker)  # TODO: control here
-        F = a + c + div_ - b - f_ #- extra_bt
+        F = a + c + div_ - b + extra_bt - f_
         return F
 
-    def state_solving_step(self, q):
-        F = self.set_state_equations(q)
+    def state_solving_step(self, q, u_r):
+        F = self.set_state_equations(q, u_r)
         problem = NonlinearProblem(F, self.w, bcs=self.bcu)
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
         solver.convergence_criterion = "incremental"
@@ -163,14 +167,25 @@ class NavierStokes:
         print(f"Number of interations: {n:d}")
         return self.w, self.W
 
-    def set_adjoint_equation(self, u, lam_2, x, h, u_d, q):
+    def set_adjoint_equation(self, u, lam_2, x, h, u_d, q, u_r):
         self.set_functions()
         a = self.viscosity * inner(grad(self.u_adj), grad(self.v_adj)) * self.dx
         c = (inner(dot(u, nabla_grad(self.v_adj)), self.u_adj) + inner(dot(self.v_adj, nabla_grad(u)),
                                                                        self.u_adj)) * self.dx
         b_form = inner(self.pr_adj, div(self.u_adj)) * self.dx
         div_ = inner(self.p_adj, div(self.v_adj)) * self.dx
-        lhs_ = a + c + div_ - b_form
+
+        v_dot_n = dot(self.v_adj, FacetNormal(self.mesh))
+        u_dot_n = dot(u, FacetNormal(self.mesh))
+
+        cosh_quadr=dot(ufl.cosh(u_dot_n / self.delta),ufl.cosh(u_dot_n / self.delta))
+        psi_d = 0.5 * (ufl.tanh(u_dot_n / self.delta) + u_dot_n / (self.delta* cosh_quadr) - 1)
+
+        psi_delta = 0.5 * (u_dot_n * ufl.tanh(u_dot_n / self.delta) - u_dot_n + self.delta)
+        d_delta = inner(psi_delta * self.v_adj, self.u_adj) * self.ds(self.inlet_marker)
+
+        adj_extra_bt = 0.5 * (inner(v_dot_n * psi_d * (u - u_r), self.u_adj) * self.ds(self.inlet_marker) + d_delta)
+        lhs_ = a + c + div_ - b_form + adj_extra_bt
         b = Function(self.W)
         b.x.array[:] = 0
 
@@ -195,7 +210,6 @@ class NavierStokes:
         ud = u_d.reshape(u_d.shape[0] * u_d.shape[1], u_d.shape[2])
         lam2 = lam_2.reshape(lam_2.shape[0] * lam_2.shape[1], lam_2.shape[2])
         gamma = -(ud - u_values - lam2)
-        #from IPython import embed; embed()
         ps1 = scifem.PointSource(self.U.sub(0), new_points, magnitude=h * gamma[:, 0])
         ps2 = scifem.PointSource(self.U.sub(1), new_points, magnitude=h * gamma[:, 1])
         ps1.apply_to_vector(b)
@@ -214,8 +228,8 @@ class NavierStokes:
         J = 0.5 * sum(h * (np.linalg.norm(u_values - ud, axis=1) ** 2)) + (self.alpha / 2) * E
         return A, b, J, u_values
 
-    def adjoint_state_solving_step(self, u, lam_2, x, h, u_d, q):
-        A, rhs, J, u_values = self.set_adjoint_equation(u, lam_2, x, h, u_d, q)
+    def adjoint_state_solving_step(self, u, lam_2, x, h, u_d, q, u_r):
+        A, rhs, J, u_values = self.set_adjoint_equation(u, lam_2, x, h, u_d, q, u_r)
         ksp = PETSc.KSP().create(self.mesh.comm)
         ksp.setOperators(A)
         ksp.setType(PETSc.KSP.Type.PREONLY)
@@ -226,6 +240,47 @@ class NavierStokes:
         up.x.scatter_forward()
 
         return up, J, u_values
+
+    def set_stokes_state(self, q):
+        self.set_functions()
+        f = Constant(self.mesh, PETSc.ScalarType((0, 0)))
+        a = self.viscosity * inner(grad(self.u_r), grad(self.v_r)) * self.dx
+        b = inner(self.p_r, div(self.v_r)) * self.dx
+        div_ = inner(self.pr_r, div(self.u_r)) * self.dx
+
+        u_dot_n = dot(self.u_r, FacetNormal(self.mesh))
+        extra_bt = 0.5 * inner(ufl.conditional(u_dot_n < 0, u_dot_n, 0) * self.u_r, self.v_r) * self.ds(
+            self.inlet_marker)
+        f_ = inner(f, self.v_r) * self.dx + inner(q, self.v_r) * self.ds(self.inlet_marker)
+        F = a + div_ - b  # - extra_bt
+        a = form(F)
+        L1 = form(f_)
+        A = assemble_matrix(a, bcs=self.bcu)
+        A.assemble()
+        b1 = create_vector(L1)
+        return A, b1, a, L1
+
+    def solve_stokes_step(self, q):
+        A, b, a, L = self.set_stokes_state(q)
+        w_s = Function(self.W)
+        solver1 = PETSc.KSP().create(self.mesh.comm)
+        solver1.setOperators(A)
+        solver1.setType(PETSc.KSP.Type.BCGS)
+        pc1 = solver1.getPC()
+        pc1.setType(PETSc.PC.Type.JACOBI)
+
+        A.zeroEntries()
+        assemble_matrix(A, a, bcs=self.bcu)
+        A.assemble()
+        with b.localForm() as loc:
+            loc.set(0)
+        assemble_vector(b, L)
+        apply_lifting(b, [a], [self.bcu])
+        b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
+        set_bc(b, self.bcu)
+        solver1.solve(b, w_s.x.petsc_vec)
+        w_s.x.scatter_forward()
+        return w_s
 
     def old_code(self):
         a = 1

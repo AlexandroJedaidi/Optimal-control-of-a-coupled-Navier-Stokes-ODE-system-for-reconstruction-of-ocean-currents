@@ -86,8 +86,8 @@ class ODE:
         self.x = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
         # self.x[:, 0, 0] = np.array([random.uniform(self.mesh_boundary_x[0], self.mesh_boundary_x[1]) for _ in range(self.K)])
         # self.x[:, 0, 0] = np.array([random.uniform(self.mesh_boundary_x[0], self.mesh_boundary_x[1]) for _ in range(self.K)])
-        self.x[:, 0, 0] = np.array([0.1 for _ in range(self.K)])
-        self.x[:, 0, 1] = np.array([0.5 for _ in range(self.K)])
+        self.x[:, 0, 0] = np.array([1.0 for _ in range(self.K)])
+        self.x[:, 0, 1] = np.array([1.0 for _ in range(self.K)])
 
 
         self.lam_2 = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))

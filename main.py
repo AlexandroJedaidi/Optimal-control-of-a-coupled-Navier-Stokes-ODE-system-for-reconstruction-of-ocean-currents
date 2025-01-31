@@ -20,7 +20,7 @@ from basix.ufl import element, mixed_element
 import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------------------------------------------------------------------
-experiment_number = 52
+experiment_number = 100
 np_path = f"results/experiments/{experiment_number}/"
 # Discretization parameters
 with open("parameters.json", "r") as file:
@@ -40,7 +40,7 @@ os.mkdir(np_path + "/vector_fields")
 os.mkdir(np_path + "/q_data")
 # ----------------------------------------------------------------------------------------------------------------------
 # parameters
-num_steps = 1
+num_steps = 500
 # ----------------------------------------------------------------------------------------------------------------------
 # Mesh
 gmsh.initialize()
@@ -207,9 +207,8 @@ def evalutate_fuct(fct, points):
     return fct.eval(points_on_proc, cells)
 
 
-def test_gradient(lam_, q_func, u_red, x_red):
+def test_gradient(lam_, q_func, u_red, x_red, opt_iter,u_r):
     ds_ = ufl.Measure("ds", subdomain_data=ft)
-    dx_ = ufl.Measure('dx', domain=mesh)
     dq, _ = Function(W).split()
     dq.x.array[:] = 1
     h_ = np.array([10 ** -(i + 1) for i in range(14)])
@@ -232,7 +231,7 @@ def test_gradient(lam_, q_func, u_red, x_red):
     for h_i in h_:
         qhat,_ = Function(W).split()
         qhat.x.array[:] = q_func.x.array[:] + h_i * dq.x.array[:]
-        w_, W_ = NS_instance.state_solving_step(qhat)
+        w_, W_ = NS_instance.state_solving_step(qhat,u_r)
         u_, p_ = w_.split()
         x_ = ODE_instance.ode_solving_step(u_)
 
@@ -244,31 +243,45 @@ def test_gradient(lam_, q_func, u_red, x_red):
 
         dJ.append((0.5 * h * sum((np.linalg.norm(u_values_ - ud, axis=1) ** 2)) + (alpha / 2) * E - J_red) / h_i)
 
-    with open(np_path + "grad_J_error.txt", "w") as text_file:
+    with open(np_path + f"grad_J_error_{opt_iter}.txt", "w") as text_file:
         text_file.write("reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
         for i, h_i in enumerate(h_[:-1]):
             text_file.write(f" {J_grad_red} \t {dJ[i]} \t {dJ[i] - J_grad_red} \t {h_i} \n")
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+dx_ = ufl.Measure('dx', domain=mesh)
+divs_u = []
+# ----------------------------------------------------------------------------------------------------------------------
+# vtx_u_r = dolfinx.io.VTXWriter(mesh.comm, np_path + f"{experiment_number}_u_reference.bp", w_r.sub(0).collapse(), engine="BP4")
+# vtx_u_r.write(0.0)
+# vtx_u_r.close()
+# ----------------------------------------------------------------------------------------------------------------------
 # optimization loop
 for i in range(num_steps):
     q_gamma_1.append(sum(q.x.array[dof_left]) + sum(q.x.array[dof_right]))
     q_gamma_2.append(sum(q.x.array[dof_wall]))
 
-    w, W = NS_instance.state_solving_step(q)  # step one
+    w_r = NS_instance.solve_stokes_step(q)
+    u_r, p_r = w_r.split()
+
+    w, W = NS_instance.state_solving_step(q, u_r)  # step one
 
     u, p = w.split()
-    eval_vector_field(mesh, grid_array, u, f"u_vectorfield_{str(i)}_AFTER_ITERATION",
-                      np_path + "vector_fields")  # plot vector fields
+    #eval_vector_field(mesh, grid_array, u, f"u_vectorfield_{str(i)}_AFTER_ITERATION",
+    #                  np_path + "vector_fields")  # plot vector fields
 
     x = ODE_instance.ode_solving_step(u)  # step two
     lam_2 = ODE_instance.adjoint_ode_solving_step(u)  # step three
-    w_adj, J, u_values = NS_instance.adjoint_state_solving_step(u, lam_2, x, h, u_d, q)  # step four
+    w_adj, J, u_values = NS_instance.adjoint_state_solving_step(u, lam_2, x, h, u_d, q, u_r)  # step four
 
     u_adj, p_adj = w_adj.split()
 
-    test_gradient(u_adj, q, u, x)
+    if i == num_steps-1 or i == 0:
+        div_u = form(dot(div(u), div(u)) * dx_)
+        comm = u.function_space.mesh.comm
+        divs_u.append(comm.allreduce(assemble_scalar(div_u), MPI.SUM))
+        test_gradient(u_adj, q, u, x, i,u_r)
 
     grad_j = q.x.array[:] - u_adj.x.array[:]
     grad_j_np.append(np.linalg.norm(grad_j))
@@ -279,6 +292,11 @@ for i in range(num_steps):
     J_array.append(J)
     x_array.append(x)
     u_array.append(u_values)
+# ----------------------------------------------------------------------------------------------------------------------
+with open(np_path + "u_divergence.txt", "w") as text_file:
+    for i, div_u_val in enumerate(divs_u):
+        text_file.write("div(u) \t \t \t i  \n")
+        text_file.write(f" {div_u_val} \t {i} \n")
 # ----------------------------------------------------------------------------------------------------------------------
 # parameter output
 with open(np_path + "variables.txt", "w") as text_file:

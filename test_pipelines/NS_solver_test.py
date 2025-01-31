@@ -20,7 +20,7 @@ from basix.ufl import element, mixed_element
 import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------------------------------------------------------------------
-experiment_number = 4
+experiment_number = 6
 np_path = f"test_pipelines/results/NS/{experiment_number}/"
 # Discretization parameters
 with open("parameters.json", "r") as file:
@@ -153,8 +153,11 @@ def boundary_values(x):
     values = np.zeros((2, x.shape[1]))
     # values[0, :] = np.where(np.isclose(x[0, :], 0.0), 1.0, np.where(np.isclose(x[0, :], 2.0), 1.0, 0.0))  # x-component
     # values[1, :] = np.where(np.isclose(x[0, :], 0.0), 0.0, 0.0)  # y-component
+    # values[0, :] = np.where(np.isclose(x[0, :], 0.0),
+    #                         0.0001 * (3 * (1 - np.cos(np.pi / 2)) + x[1] * (2.0 - x[1]) / (2 ** 2)), 0.0)
     values[0, :] = np.where(np.isclose(x[0, :], 0.0),
-                            0.00001 * (3 * (1 - np.cos(np.pi / 2)) + x[1] * (2.0 - x[1]) / (2 ** 2)), 0.0)
+                            0.1,
+                            0.0)
     return values
 
 
@@ -173,15 +176,25 @@ q_gamma_2 = []
 x_array = []
 grad_j_np = []
 u_array = []
+divs_u = []
 # ----------------------------------------------------------------------------------------------------------------------
+dx_ = ufl.Measure('dx', domain=mesh)
 # optimization loop
 for i in range(num_steps):
     q_gamma_1.append(sum(q.x.array[dof_left]) + sum(q.x.array[dof_right]))
     q_gamma_2.append(sum(q.x.array[dof_wall]))
     w, W = NS_instance.state_solving_step(q)  # step one
     u, p = w.split()
+    div_u = form(inner(div(u), div(u))*dx_)
+    comm = u.function_space.mesh.comm
+    divs_u.append(comm.allreduce(assemble_scalar(div_u), MPI.SUM))
     q_abs.append(sum(q.x.array))
     x_array.append(x[0])
+# ----------------------------------------------------------------------------------------------------------------------
+with open(np_path + "u_divergence.txt", "w") as text_file:
+    for i, div_u_val in enumerate(divs_u):
+        text_file.write("div(u) \t \t \t i  \n")
+        text_file.write(f" {div_u_val} \t {i} \n")
 # ----------------------------------------------------------------------------------------------------------------------
 # parameter output
 with open(np_path + "variables.txt", "w") as text_file:
