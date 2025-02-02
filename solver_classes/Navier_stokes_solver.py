@@ -77,8 +77,8 @@ class NavierStokes:
         self.set_boundary_conditions()
 
     def set_function_spaces(self):
-        U_el = element("Lagrange", self.mesh.basix_cell(), 3, shape=(self.mesh.geometry.dim,))
-        P_el = element("Lagrange", self.mesh.basix_cell(), 2)
+        U_el = element("Lagrange", self.mesh.basix_cell(), 5, shape=(self.mesh.geometry.dim,))
+        P_el = element("Lagrange", self.mesh.basix_cell(), 4)
         W_el = mixed_element([U_el, P_el])
         self.W = functionspace(self.mesh, W_el)
         self.U, _ = self.W.sub(0).collapse()
@@ -144,6 +144,7 @@ class NavierStokes:
         return F
 
     def state_solving_step(self, q, u_r):
+        print("solving primal NS")
         F = self.set_state_equations(q, u_r)
         problem = NonlinearProblem(F, self.w, bcs=self.bcu)
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
@@ -161,7 +162,7 @@ class NavierStokes:
         opts[f"{option_prefix}pc_hypre_boomeramg_max_iter"] = 1
         opts[f"{option_prefix}pc_hypre_boomeramg_cycle_type"] = "v"
         ksp.setFromOptions()
-        log.set_log_level(log.LogLevel.INFO)
+        #log.set_log_level(log.LogLevel.INFO)
         n, converged = solver.solve(self.w)
         assert (converged)
         print(f"Number of interations: {n:d}")
@@ -208,6 +209,7 @@ class NavierStokes:
 
         u_values = u.eval(points_on_proc, cells)
         ud = u_d.reshape(u_d.shape[0] * u_d.shape[1], u_d.shape[2])
+        #from IPython import embed; embed()
         lam2 = lam_2.reshape(lam_2.shape[0] * lam_2.shape[1], lam_2.shape[2])
         gamma = -(ud - u_values - lam2)
         ps1 = scifem.PointSource(self.U.sub(0), new_points, magnitude=h * gamma[:, 0])
@@ -229,6 +231,7 @@ class NavierStokes:
         return A, b, J, u_values
 
     def adjoint_state_solving_step(self, u, lam_2, x, h, u_d, q, u_r):
+        print("solving adjoint NS")
         A, rhs, J, u_values = self.set_adjoint_equation(u, lam_2, x, h, u_d, q, u_r)
         ksp = PETSc.KSP().create(self.mesh.comm)
         ksp.setOperators(A)

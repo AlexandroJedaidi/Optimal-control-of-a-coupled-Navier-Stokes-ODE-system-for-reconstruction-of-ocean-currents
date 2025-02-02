@@ -20,7 +20,7 @@ from basix.ufl import element, mixed_element
 import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------------------------------------------------------------------
-experiment_number = 100
+experiment_number = 117
 np_path = f"results/experiments/{experiment_number}/"
 # Discretization parameters
 with open("parameters.json", "r") as file:
@@ -40,7 +40,7 @@ os.mkdir(np_path + "/vector_fields")
 os.mkdir(np_path + "/q_data")
 # ----------------------------------------------------------------------------------------------------------------------
 # parameters
-num_steps = 500
+num_steps = 50
 # ----------------------------------------------------------------------------------------------------------------------
 # Mesh
 gmsh.initialize()
@@ -139,8 +139,8 @@ u_d = ODE_instance.u_d
 N = ODE_instance.N
 # ----------------------------------------------------------------------------------------------------------------------
 # init q
-U_el = element("Lagrange", mesh.basix_cell(), 3, shape=(mesh.geometry.dim,))
-P_el = element("Lagrange", mesh.basix_cell(), 2)
+U_el = element("Lagrange", mesh.basix_cell(), 5, shape=(mesh.geometry.dim,))
+P_el = element("Lagrange", mesh.basix_cell(), 4)
 W_el = mixed_element([U_el, P_el])
 W = functionspace(mesh, W_el)
 qp = Function(W)
@@ -159,7 +159,7 @@ def boundary_values(x):
     # values[0, :] = np.where(np.isclose(x[0, :], 0.0), 1.0, np.where(np.isclose(x[0, :], 2.0), 1.0, 0.0))  # x-component
     # values[1, :] = np.where(np.isclose(x[0, :], 0.0), 0.0, 0.0)  # y-component
     values[0, :] = np.where(np.isclose(x[0, :], 0.0),
-                            0.1 * 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
+                            0.1 ,#* 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
                             0.0)
     return values
 
@@ -277,14 +277,14 @@ for i in range(num_steps):
 
     u_adj, p_adj = w_adj.split()
 
-    if i == num_steps-1 or i == 0:
-        div_u = form(dot(div(u), div(u)) * dx_)
-        comm = u.function_space.mesh.comm
-        divs_u.append(comm.allreduce(assemble_scalar(div_u), MPI.SUM))
-        test_gradient(u_adj, q, u, x, i,u_r)
-
-    grad_j = q.x.array[:] - u_adj.x.array[:]
-    grad_j_np.append(np.linalg.norm(grad_j))
+    # if i == num_steps-1 or i == 0:
+    #     div_u = form(dot(div(u), div(u)) * dx_)
+    #     comm = u.function_space.mesh.comm
+    #     divs_u.append(comm.allreduce(assemble_scalar(div_u), MPI.SUM))
+    #     test_gradient(u_adj, q, u, x, i,u_r)
+    #
+    # grad_j = q.x.array[:] - u_adj.x.array[:]
+    # grad_j_np.append(np.linalg.norm(grad_j))
 
     q.x.array[:] = q.x.array[:] - mu * (alpha * q.x.array[:] - u_adj.x.array[:])
 

@@ -78,36 +78,44 @@ class ODE:
         self.set_functions()
 
     def set_function_spaces(self):
-
         self.time_interval = np.linspace(self.t0, self.T, int(self.T / self.h))
         self.N = len(self.time_interval[1:])
 
-    def set_functions(self):
         self.x = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
-        # self.x[:, 0, 0] = np.array([random.uniform(self.mesh_boundary_x[0], self.mesh_boundary_x[1]) for _ in range(self.K)])
-        # self.x[:, 0, 0] = np.array([random.uniform(self.mesh_boundary_x[0], self.mesh_boundary_x[1]) for _ in range(self.K)])
+        # self.x[:, 0, 0] = np.array(
+        #     [random.uniform(self.mesh_boundary_x[0], self.mesh_boundary_x[1]) for _ in range(self.K)])
+        # self.x[:, 0, 1] = np.array(
+        #     [random.uniform(self.mesh_boundary_y[0], self.mesh_boundary_y[1]) for _ in range(self.K)])
+
         self.x[:, 0, 0] = np.array([1.0 for _ in range(self.K)])
         self.x[:, 0, 1] = np.array([1.0 for _ in range(self.K)])
 
+        # ud1 = lambda t: 0.1 * 3 * t * (2.0 - t) / (2.0 ** 2)
+        ud1 = lambda t: 0.5*(np.cos(np.pi*(t - 0.5)) - 1 - np.cos(np.pi))
+        self.u_d = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
+        for k in range(self.K):
+            for i in range(len(self.time_interval)):
+                self.u_d[k, i, 0] = ud1(self.time_interval[i])
 
+    def set_functions(self):
         self.lam_2 = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
 
-        self.u_d = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
-
     def ode_solving_step(self, u):
+        print("solving primal ODE")
         self.set_functions()
         # explicit euler
         bb_tree = dolfinx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
         for b in range(self.K):
             for k, t_k in enumerate(self.time_interval[:-1]):
-                #print("time: " + str(t_k))
+                # print("time: " + str(t_k))
                 point = np.array([self.x[b, k, :][0].item(), self.x[b, k, :][1].item(), 0])
                 cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, point)
                 colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates, point).array
                 if len(colliding_cells) == 0:
                     print("no colliding cells at time:" + str(t_k))
                     print("buoy number: " + str(b))
-                    print("original coordinate: " + str(self.x[b, 0, :][0].item()) + " " + str(self.x[b, 0, :][1].item()))
+                    print(
+                        "original coordinate: " + str(self.x[b, 0, :][0].item()) + " " + str(self.x[b, 0, :][1].item()))
                     print("actual coordinate: " + str(point))
                     exit(0)
                 u_values = u.eval(point, colliding_cells[0])
@@ -115,6 +123,7 @@ class ODE:
         return self.x
 
     def adjoint_ode_solving_step(self, u):
+        print("solving adjoint ODE")
         self.set_functions()
         grad_u = ufl.grad(u)
         U_grad_fp = dolfinx.fem.functionspace(self.mesh,
@@ -125,7 +134,7 @@ class ODE:
         bb_tree = dolfinx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
         for b in range(self.K):
             N = len(self.time_interval[1:])
-            for k in range(N-1, -1, -1):
+            for k in range(N - 1, -1, -1):
                 point = np.array([self.x[b, k, :][0].item(), self.x[b, k, :][1].item(), 0])
                 cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, point)
                 colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates, point).array
@@ -139,7 +148,7 @@ class ODE:
 
                 u_values = u.eval(point, colliding_cells[0])
                 A = (np.identity(2) + self.h * grad_u_matr.T)
-                b_vec = self.lam_2[b, k+1, :] - self.h * grad_u_matr.T @ (u_values - self.u_d[b, k, :])
+                b_vec = self.lam_2[b, k + 1, :] - self.h * grad_u_matr.T @ (u_values - self.u_d[b, k, :])
                 self.lam_2[b, k, :] = np.linalg.solve(A, b_vec)
         return self.lam_2
 
