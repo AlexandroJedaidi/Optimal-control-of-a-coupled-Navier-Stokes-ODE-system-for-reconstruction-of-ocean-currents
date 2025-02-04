@@ -20,7 +20,7 @@ from basix.ufl import element, mixed_element
 import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------------------------------------------------------------------
-experiment_number = 117
+experiment_number = 143
 np_path = f"results/experiments/{experiment_number}/"
 # Discretization parameters
 with open("parameters.json", "r") as file:
@@ -40,7 +40,7 @@ os.mkdir(np_path + "/vector_fields")
 os.mkdir(np_path + "/q_data")
 # ----------------------------------------------------------------------------------------------------------------------
 # parameters
-num_steps = 50
+num_steps = 30
 # ----------------------------------------------------------------------------------------------------------------------
 # Mesh
 gmsh.initialize()
@@ -159,8 +159,10 @@ def boundary_values(x):
     # values[0, :] = np.where(np.isclose(x[0, :], 0.0), 1.0, np.where(np.isclose(x[0, :], 2.0), 1.0, 0.0))  # x-component
     # values[1, :] = np.where(np.isclose(x[0, :], 0.0), 0.0, 0.0)  # y-component
     values[0, :] = np.where(np.isclose(x[0, :], 0.0),
-                            0.1 ,#* 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
-                            0.0)
+                            0.1*(1-(x[1]-1)**2) ,#* 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
+                            np.where(np.isclose(x[0, :], 2.0), -0.1*(1-(x[1]-1)**2),
+                                     0.0)
+                            )
     return values
 
 
@@ -277,11 +279,11 @@ for i in range(num_steps):
 
     u_adj, p_adj = w_adj.split()
 
-    # if i == num_steps-1 or i == 0:
-    #     div_u = form(dot(div(u), div(u)) * dx_)
-    #     comm = u.function_space.mesh.comm
-    #     divs_u.append(comm.allreduce(assemble_scalar(div_u), MPI.SUM))
-    #     test_gradient(u_adj, q, u, x, i,u_r)
+    if i == num_steps-1 or i == 0:
+         div_u = form(dot(div(u), div(u)) * dx_)
+         comm = u.function_space.mesh.comm
+         divs_u.append(comm.allreduce(assemble_scalar(div_u), MPI.SUM))
+         #test_gradient(u_adj, q, u, x, i,u_r)
     #
     # grad_j = q.x.array[:] - u_adj.x.array[:]
     # grad_j_np.append(np.linalg.norm(grad_j))
@@ -334,9 +336,10 @@ for k, x_ in enumerate(x_array):
     for i, x_buoy in enumerate(x_):
         x_coord = x_buoy[:, 0]
         y_coord = x_buoy[:, 1]
-        plt.xlim(0,2)
-        plt.ylim(0,2)
-        plt.plot(x_coord, y_coord, label=f"buoy_{i}_movement", **{'color': 'lightsteelblue', 'marker': 'o'})
+        plt.xlim(0.5,1.5)
+        plt.ylim(0.5,1.5)
+        plt.plot([x_buoy[0,0],x_buoy[0,0] + 1/np.pi], [x_buoy[0,1],x_buoy[0,1]],label="x0 and xT for u_D", color="r")
+        plt.plot(x_coord, y_coord, label=f"buoy_{i}_movement", color="b")
         plt.savefig(f"{np_path}buoy_movements/buoy_{i}_{k}_movement.png")
         plt.clf()
 

@@ -75,7 +75,8 @@ class ODE:
 
         self.debug_path = f"results/debug/"
         self.set_function_spaces()
-        self.set_functions()
+        self.set_primal_functions()
+        self.set_adjoint_functions()
 
     def set_function_spaces(self):
         self.time_interval = np.linspace(self.t0, self.T, int(self.T / self.h))
@@ -87,9 +88,6 @@ class ODE:
         # self.x[:, 0, 1] = np.array(
         #     [random.uniform(self.mesh_boundary_y[0], self.mesh_boundary_y[1]) for _ in range(self.K)])
 
-        self.x[:, 0, 0] = np.array([1.0 for _ in range(self.K)])
-        self.x[:, 0, 1] = np.array([1.0 for _ in range(self.K)])
-
         # ud1 = lambda t: 0.1 * 3 * t * (2.0 - t) / (2.0 ** 2)
         ud1 = lambda t: 0.5*(np.cos(np.pi*(t - 0.5)) - 1 - np.cos(np.pi))
         self.u_d = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
@@ -97,12 +95,16 @@ class ODE:
             for i in range(len(self.time_interval)):
                 self.u_d[k, i, 0] = ud1(self.time_interval[i])
 
-    def set_functions(self):
+    def set_primal_functions(self):
+        self.x[:, 0, 0] = np.array([1.0 for _ in range(self.K)])
+        self.x[:, 0, 1] = np.array([1.0 for _ in range(self.K)])
+
+    def set_adjoint_functions(self):
         self.lam_2 = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
 
     def ode_solving_step(self, u):
         print("solving primal ODE")
-        self.set_functions()
+        self.set_primal_functions()
         # explicit euler
         bb_tree = dolfinx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
         for b in range(self.K):
@@ -124,10 +126,10 @@ class ODE:
 
     def adjoint_ode_solving_step(self, u):
         print("solving adjoint ODE")
-        self.set_functions()
+        self.set_adjoint_functions()
         grad_u = ufl.grad(u)
         U_grad_fp = dolfinx.fem.functionspace(self.mesh,
-                                              ("Lagrange", 2, (self.mesh.geometry.dim, self.mesh.geometry.dim)))
+                                              ("Lagrange", 6, (self.mesh.geometry.dim, self.mesh.geometry.dim)))
         u_grad_expr = dolfinx.fem.Expression(grad_u, U_grad_fp.element.interpolation_points())
         u_grad_fct = dolfinx.fem.Function(U_grad_fp)
         u_grad_fct.interpolate(u_grad_expr)
@@ -147,7 +149,7 @@ class ODE:
                                         [grad_u_values[2].item(), grad_u_values[3].item()]])
 
                 u_values = u.eval(point, colliding_cells[0])
-                A = (np.identity(2) + self.h * grad_u_matr.T)
+                A = (np.identity(2) - self.h * grad_u_matr.T)
                 b_vec = self.lam_2[b, k + 1, :] - self.h * grad_u_matr.T @ (u_values - self.u_d[b, k, :])
                 self.lam_2[b, k, :] = np.linalg.solve(A, b_vec)
         return self.lam_2
