@@ -34,6 +34,7 @@ def petsc_vector_to_numpy(vec):
 class NavierStokes:
 
     def __init__(self, mesh, ft, inlet_marker, wall_marker, outlet_marker, experiment_number, np_path):
+        self.bcu = None
         self.np_path = np_path
         self.experiment_number = experiment_number
         self.p = None
@@ -77,31 +78,15 @@ class NavierStokes:
         self.set_boundary_conditions()
 
     def set_function_spaces(self):
-        U_el = element("Lagrange", self.mesh.basix_cell(), 5, shape=(self.mesh.geometry.dim,))
-        P_el = element("Lagrange", self.mesh.basix_cell(), 4)
+        U_el = element("Lagrange", self.mesh.basix_cell(), 2, shape=(self.mesh.geometry.dim,))
+        P_el = element("Lagrange", self.mesh.basix_cell(), 1)
         W_el = mixed_element([U_el, P_el])
         self.W = functionspace(self.mesh, W_el)
         self.U, _ = self.W.sub(0).collapse()
 
     def set_boundary_conditions(self):
         self.dx = ufl.Measure('dx', domain=self.mesh)
-        self.ds = ufl.Measure("ds", subdomain_data=self.ft)
-
-        # class InletVelocity():
-        #     def __init__(self):
-        #         self.t = 1
-        #
-        #     def __call__(self, x):
-        #         values = np.zeros((2, x.shape[1]), dtype=PETSc.ScalarType)
-        #         values[0] = 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2)
-        #         return values
-        #
-        # # Inlet
-        # u_inlet = Function(self.U)
-        # inlet_velocity = InletVelocity()
-        # u_inlet.interpolate(inlet_velocity)
-        # inlet_dofs = locate_dofs_topological((self.W.sub(0), self.U), self.fdim, self.ft.find(self.inlet_marker))
-        # bcu_inflow = dirichletbc(u_inlet, inlet_dofs, self.W.sub(0))
+        self.ds = ufl.Measure("ds", domain=self.mesh, subdomain_data=self.ft)
 
         def nonslip(x):
             values = np.zeros((2, x.shape[1]))
@@ -112,8 +97,6 @@ class NavierStokes:
 
         wall_dofs = locate_dofs_topological((self.W.sub(0), self.U), self.fdim, self.ft.find(self.wall_marker))
         bcu_wall = dirichletbc(u_nonslip, wall_dofs, self.W.sub(0))
-        # outlet_dofs = locate_dofs_topological((self.W.sub(0), self.U), self.fdim, self.ft.find(self.outlet_marker))
-        # bcu_outlet = dirichletbc(u_nonslip, outlet_dofs, self.W.sub(0))
         self.bcu = [bcu_wall]
 
     def set_functions(self):
@@ -129,21 +112,27 @@ class NavierStokes:
         self.u_r, self.p_r = TrialFunctions(self.W)
         self.v_r, self.pr_r = TestFunctions(self.W)
 
+        self.u_r_adj, self.p_r_adj = TrialFunctions(self.W)
+        self.v_r_adj, self.pr_r_adj = TestFunctions(self.W)
+
     def set_state_equations(self, q, u_r):
         self.set_functions()
         f = Constant(self.mesh, PETSc.ScalarType((0, 0)))
-        a = self.viscosity * inner(grad(self.u), grad(self.v)) * self.dx
-        b = inner(self.p, div(self.v)) * self.dx
-        div_ = inner(self.pr, div(self.u)) * self.dx
-        c = inner(dot(self.u, nabla_grad(self.u)), self.v) * self.dx
-        u_dot_n = dot(self.u, FacetNormal(self.mesh))
-        psi_delta = 0.5 * (u_dot_n * ufl.tanh(u_dot_n / self.delta) - u_dot_n + self.delta)
-        extra_bt = 0.5 * inner(psi_delta * self.u - u_r, self.v) * self.ds(self.inlet_marker)
-        f_ = inner(f, self.v) * self.dx + inner(q, self.v) * self.ds(self.inlet_marker)  # TODO: control here
+        a = self.viscosity * inner(grad(self.u), grad(self.v)) * self.dx # nabla u
+        b = inner(self.p, div(self.v)) * self.dx # div(test)*p
+        div_ = inner(self.pr, div(self.u)) * self.dx # div(u)*test_p
+        c = inner(dot(self.u, nabla_grad(self.u)), self.v) * self.dx #nonlinear term
+        u_dot_n = dot(self.u, FacetNormal(self.mesh)) # u * n
+        psi_delta = 0.5 * (u_dot_n * ufl.tanh(u_dot_n / self.delta) - u_dot_n + self.delta) # psi(u*n)
+        if u_r is not None:
+            extra_bt = 0.5 * inner(psi_delta * self.u, self.v) * self.ds(self.inlet_marker) # 0.5 int((psi(u*n)*u - u_r) * test_u)_Gamma_1
+        else:
+            extra_bt = 0.5 * inner(psi_delta * self.u, self.v) * self.ds(self.inlet_marker) # 0.5 int((psi(u*n)*u - u_r) * test_u)_Gamma_1
+        f_ = inner(f, self.v) * self.dx + inner(q, self.v) * self.ds(self.inlet_marker)  # control
         F = a + c + div_ - b + extra_bt - f_
         return F
 
-    def state_solving_step(self, q, u_r):
+    def state_solving_step(self, q, u_r, opt_step):
         print("solving primal NS")
         F = self.set_state_equations(q, u_r)
         problem = NonlinearProblem(F, self.w, bcs=self.bcu)
@@ -151,22 +140,30 @@ class NavierStokes:
         solver.convergence_criterion = "incremental"
         solver.rtol = 1e-6
         solver.report = True
-        solver.max_it = 1000
+        solver.max_it = 100
         ksp = solver.krylov_solver
         opts = PETSc.Options()
         option_prefix = ksp.getOptionsPrefix()
         opts[f"{option_prefix}ksp_type"] = "gmres"
-        opts[f"{option_prefix}ksp_rtol"] = 1.0e-8
-        opts[f"{option_prefix}pc_type"] = "hypre"
-        opts[f"{option_prefix}pc_hypre_type"] = "boomeramg"
-        opts[f"{option_prefix}pc_hypre_boomeramg_max_iter"] = 1
-        opts[f"{option_prefix}pc_hypre_boomeramg_cycle_type"] = "v"
+        # opts[f"{option_prefix}ksp_rtol"] = 1.0e-8
+        # opts[f"{option_prefix}pc_type"] = "hypre"
+        # opts[f"{option_prefix}pc_hypre_type"] = "boomeramg"
+        # opts[f"{option_prefix}pc_hypre_boomeramg_max_iter"] = 1
+        # opts[f"{option_prefix}pc_hypre_boomeramg_cycle_type"] = "v"
         ksp.setFromOptions()
         #log.set_log_level(log.LogLevel.INFO)
         n, converged = solver.solve(self.w)
         assert (converged)
         print(f"Number of interations: {n:d}")
-        return self.w, self.W
+
+        # vtx_u = dolfinx.io.VTXWriter(self.mesh.comm, self.np_path + f"{self.experiment_number}_{opt_step}_u.bp", self.w.sub(0).collapse(),
+        #                              engine="BP4")
+        # vtx_u.write(0.0)
+        # vtx_u.close()
+
+        sol = Function(self.W)
+        sol.x.array[:] = self.w.x.array
+        return sol
 
     def set_adjoint_equation(self, u, lam_2, x, h, u_d, q, u_r):
         self.set_functions()
@@ -185,7 +182,7 @@ class NavierStokes:
         psi_delta = 0.5 * (u_dot_n * ufl.tanh(u_dot_n / self.delta) - u_dot_n + self.delta)
         d_delta = inner(psi_delta * self.v_adj, self.u_adj) * self.ds(self.inlet_marker)
 
-        adj_extra_bt = 0.5 * (inner(v_dot_n * psi_d * (u - u_r), self.u_adj) * self.ds(self.inlet_marker) + d_delta)
+        adj_extra_bt = 0.5 * (inner(v_dot_n * psi_d * (u), self.u_adj) * self.ds(self.inlet_marker) + d_delta)
         lhs_ = a + c + div_ - b_form + adj_extra_bt
         b = Function(self.W)
         b.x.array[:] = 0
@@ -194,28 +191,48 @@ class NavierStokes:
         zeros = np.zeros((*x.shape[:2], 1))
         new_points = np.concatenate((x, zeros), axis=-1)
 
-        point_shape = new_points.shape
-        new_points = new_points.reshape(point_shape[0] * point_shape[1], point_shape[2])
+        u_values_arr = []
+        for k, buoy_points in enumerate(new_points):
+            cells = []
+            points_on_proc = []
+            cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, buoy_points)
+            colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates,
+                                                                       buoy_points)
+            for i, point in enumerate(buoy_points):
+                if len(colliding_cells.links(i)) > 0:
+                    points_on_proc.append(point)
+                    cells.append(colliding_cells.links(i)[0])
 
-        cells = []
-        points_on_proc = []
-        cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, new_points)
-        colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates,
-                                                                   new_points)
-        for i, point in enumerate(new_points):
-            if len(colliding_cells.links(i)) > 0:
-                points_on_proc.append(point)
-                cells.append(colliding_cells.links(i)[0])
+            u_values = u.eval(points_on_proc, cells)
+            gamma = (u_d[k, : , :] - u_values + lam_2[k,:,:])
+            ps1 = scifem.PointSource(self.W.sub(0).sub(0), new_points, magnitude=h * gamma[:, 0])
+            ps2 = scifem.PointSource(self.W.sub(0).sub(1), new_points, magnitude=h * gamma[:, 1])
+            ps1.apply_to_vector(b)
+            ps2.apply_to_vector(b)
+            u_values_arr.append(u_values)
 
-        u_values = u.eval(points_on_proc, cells)
-        ud = u_d.reshape(u_d.shape[0] * u_d.shape[1], u_d.shape[2])
-        #from IPython import embed; embed()
-        lam2 = lam_2.reshape(lam_2.shape[0] * lam_2.shape[1], lam_2.shape[2])
-        gamma = (ud - u_values + lam2)
-        ps1 = scifem.PointSource(self.W.sub(0).sub(0), new_points, magnitude=h * gamma[:, 0])
-        ps2 = scifem.PointSource(self.W.sub(0).sub(1), new_points, magnitude=h * gamma[:, 1])
-        ps1.apply_to_vector(b)
-        ps2.apply_to_vector(b)
+        # point_shape = new_points.shape
+        # new_points = new_points.reshape(point_shape[0] * point_shape[1], point_shape[2])
+        #
+        # cells = []
+        # points_on_proc = []
+        # cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, new_points)
+        # colliding_cells = dolfinx.geometry.compute_colliding_cells(self.mesh, cell_candidates,
+        #                                                            new_points)
+        # for i, point in enumerate(new_points):
+        #     if len(colliding_cells.links(i)) > 0:
+        #         points_on_proc.append(point)
+        #         cells.append(colliding_cells.links(i)[0])
+        #
+        # u_values = u.eval(points_on_proc, cells)
+        # ud = u_d.reshape(u_d.shape[0] * u_d.shape[1], u_d.shape[2])
+        # lam2 = lam_2.reshape(lam_2.shape[0] * lam_2.shape[1], lam_2.shape[2])
+        # gamma = (ud - u_values + lam2)
+        # ps1 = scifem.PointSource(self.W.sub(0).sub(0), new_points, magnitude=h * gamma[:, 0])
+        # ps2 = scifem.PointSource(self.W.sub(0).sub(1), new_points, magnitude=h * gamma[:, 1])
+        # ps1.apply_to_vector(b)
+        # ps2.apply_to_vector(b)
+
         lhs_form = form(lhs_)
         apply_lifting(b.x.petsc_vec, [lhs_form], [self.bcu])
         b.x.scatter_reverse(dolfinx.la.InsertMode.add)
@@ -227,8 +244,8 @@ class NavierStokes:
         qnorm = form(dot(q, q) * self.ds(self.inlet_marker))
         comm = q.function_space.mesh.comm
         E = comm.allreduce(assemble_scalar(qnorm), MPI.SUM)
-        J = 0.5 * sum(h * (np.linalg.norm(u_values - ud, axis=1) ** 2)) + (self.alpha / 2) * E
-        return A, b, J, u_values
+        J = 0.5 * np.sum(np.sum(h * (np.linalg.norm(np.array(u_values_arr) - u_d, axis=2) ** 2), axis=1)) + (self.alpha / 2) * E
+        return A, b, J, u_values_arr
 
     def adjoint_state_solving_step(self, u, lam_2, x, h, u_d, q, u_r):
         print("solving adjoint NS")
@@ -250,11 +267,22 @@ class NavierStokes:
         a = self.viscosity * inner(grad(self.u_r), grad(self.v_r)) * self.dx
         b = inner(self.p_r, div(self.v_r)) * self.dx
         div_ = inner(self.pr_r, div(self.u_r)) * self.dx
-
-        u_dot_n = dot(self.u_r, FacetNormal(self.mesh))
-        extra_bt = 0.5 * inner(ufl.conditional(u_dot_n < 0, u_dot_n, 0) * self.u_r, self.v_r) * self.ds(
-            self.inlet_marker)
         f_ = inner(f, self.v_r) * self.dx + inner(q, self.v_r) * self.ds(self.inlet_marker)
+        F = a + div_ - b  # - extra_bt
+        a = form(F)
+        L1 = form(f_)
+        A = assemble_matrix(a, bcs=self.bcu)
+        A.assemble()
+        b1 = create_vector(L1)
+        return A, b1, a, L1
+
+    def set_adjoint_stokes(self, u):
+        self.set_functions()
+        f = Constant(self.mesh, PETSc.ScalarType((0, 0)))
+        a = self.viscosity * inner(grad(self.u_r_adj), grad(self.v_r_adj)) * self.dx
+        b = inner(self.p_r_adj, div(self.v_r_adj)) * self.dx
+        div_ = inner(self.pr_r_adj, div(self.u_r_adj)) * self.dx
+        f_ = inner(u, self.v_r_adj) * self.dx
         F = a + div_ - b  # - extra_bt
         a = form(F)
         L1 = form(f_)
@@ -265,6 +293,28 @@ class NavierStokes:
 
     def solve_stokes_step(self, q):
         A, b, a, L = self.set_stokes_state(q)
+        w_s = Function(self.W)
+        solver1 = PETSc.KSP().create(self.mesh.comm)
+        solver1.setOperators(A)
+        solver1.setType(PETSc.KSP.Type.BCGS)
+        pc1 = solver1.getPC()
+        pc1.setType(PETSc.PC.Type.JACOBI)
+
+        A.zeroEntries()
+        assemble_matrix(A, a, bcs=self.bcu)
+        A.assemble()
+        with b.localForm() as loc:
+            loc.set(0)
+        assemble_vector(b, L)
+        apply_lifting(b, [a], [self.bcu])
+        b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
+        set_bc(b, self.bcu)
+        solver1.solve(b, w_s.x.petsc_vec)
+        w_s.x.scatter_forward()
+        return w_s
+
+    def solve_adoint_stokes_step(self, u):
+        A, b, a, L = self.set_adjoint_stokes(u)
         w_s = Function(self.W)
         solver1 = PETSc.KSP().create(self.mesh.comm)
         solver1.setOperators(A)

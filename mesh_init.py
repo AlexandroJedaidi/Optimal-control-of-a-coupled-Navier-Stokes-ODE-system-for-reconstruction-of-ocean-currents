@@ -117,7 +117,7 @@ def create_pipe_mesh(gdim, print_mesh_data=False, obst=False):
         gmsh.model.addPhysicalGroup(volumes[0][0], [volumes[0][1]], fluid_marker)
         gmsh.model.setPhysicalName(volumes[0][0], fluid_marker, "Fluid")
 
-    inlet_marker, outlet_marker, wall_marker, obstacle_marker = 0, 10, 50, 100
+    inlet_marker, outlet_marker, wall_marker, obstacle_marker = 0, 1, 2, 3
     inflow, outflow, walls, obstacle = [], [], [], []
     if mesh_comm.rank == model_rank:
         boundaries = gmsh.model.getBoundary(volumes, oriented=False)
@@ -166,7 +166,7 @@ def create_pipe_mesh(gdim, print_mesh_data=False, obst=False):
         gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 2)
         gmsh.option.setNumber("Mesh.RecombineAll", 1)
         gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 1)
-        # gmsh.option.setNumber("Mesh.MeshSizeMax", 0.03)  # define max mesh size
+        gmsh.option.setNumber("Mesh.MeshSizeMax", 0.09)  # define max mesh size
         gmsh.model.mesh.generate(gdim)
         gmsh.model.mesh.setOrder(2)
         gmsh.model.mesh.optimize("Netgen")

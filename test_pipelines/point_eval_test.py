@@ -9,7 +9,7 @@ import numpy as np
 domain = mesh.create_rectangle(MPI.COMM_WORLD, [(0.0, 0.0), (1.0, 1.0)],
                           (3,3), mesh.CellType.quadrilateral)
 
-V = dolfinx.fem.functionspace(domain,("Lagrange", 2, (domain.geometry.dim,)))
+V = dolfinx.fem.functionspace(domain,("Lagrange", 1, (domain.geometry.dim,)))
 u = dolfinx.fem.Function(V)
 
 
@@ -17,14 +17,14 @@ def u_values(x):
     values = np.zeros((2, x.shape[1]))
     # values[0, :] = np.where(np.isclose(x[0, :], 0.0), 1.0, np.where(np.isclose(x[0, :], 2.0), 1.0, 0.0))  # x-component
     # values[1, :] = np.where(np.isclose(x[0, :], 0.0), 0.0, 0.0)  # y-component
-    values[0, :] = x[0,:]**2 + 2*x[1,:]**2
+    values[0, :] = 0.83*x[0,:] + 1.24*x[1,:]
     return values
 
 
 u.interpolate(u_values)
 grad_u = ufl.grad(u)
 U_grad_fp = dolfinx.fem.functionspace(domain,
-                                      ("Lagrange", 2, (domain.geometry.dim, domain.geometry.dim)))
+                                      ("Lagrange", 1, (domain.geometry.dim, domain.geometry.dim)))
 u_grad_expr = dolfinx.fem.Expression(grad_u, U_grad_fp.element.interpolation_points())
 u_grad_fct = dolfinx.fem.Function(U_grad_fp)
 u_grad_fct.interpolate(u_grad_expr)
@@ -40,3 +40,4 @@ grad_u_values = u_grad_fct.eval(point, colliding_cells[0])
 grad_u_matr = np.array([[grad_u_values[0].item(), grad_u_values[1].item()],
                         [grad_u_values[2].item(), grad_u_values[3].item()]])
 u_values = u.eval(point, colliding_cells[0])
+from IPython import embed; embed()

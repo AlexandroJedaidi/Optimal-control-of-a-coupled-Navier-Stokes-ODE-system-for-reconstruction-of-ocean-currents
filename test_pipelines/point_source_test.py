@@ -61,7 +61,7 @@ ps2 = scifem.PointSource(U.sub(1), points, magnitude=u_values[:, 1])
 ps1.apply_to_vector(b)
 ps2.apply_to_vector(b)
 b_val = b.eval(points_on_proc, cells)
-
+from IPython import embed; embed()
 boundary_facets = dolfinx.mesh.exterior_facet_indices(domain.topology)
 dofs = dolfinx.fem.locate_dofs_topological(U, 1, boundary_facets)
 u_bc = dolfinx.fem.Function(U)
