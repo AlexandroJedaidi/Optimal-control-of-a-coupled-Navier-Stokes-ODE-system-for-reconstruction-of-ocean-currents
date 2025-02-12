@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 
 # ----------------------------------------------------------------------------------------------------------------------
-experiment_number = 16
+experiment_number = 23
 np_path = f"results/experiments/{experiment_number}/"
 # Discretization parameters
 with open("parameters.json", "r") as file:
@@ -43,7 +43,7 @@ os.mkdir(np_path + "/vector_fields")
 os.mkdir(np_path + "/q_data")
 # ----------------------------------------------------------------------------------------------------------------------
 # parameters
-num_steps = 100
+num_steps = 25
 # ----------------------------------------------------------------------------------------------------------------------
 # Mesh
 gmsh.initialize()
@@ -214,13 +214,14 @@ plt.clf()
 os.mkdir(np_path + "buoy_movements")
 os.mkdir(np_path + "buoy_movements/frames")
 for k, x_ in enumerate(x_array):
+    color = plt.cm.rainbow(np.linspace(0, 1, K))
     for i, x_buoy in enumerate(x_):
         x_coord = x_buoy[:, 0]
         y_coord = x_buoy[:, 1]
         plt.xlim(0.0, 2)
         plt.ylim(0.0, 2)
         plt.plot([x_buoy[0, 0], x_buoy[0, 0] + 1 / (np.pi)], [x_buoy[0, 1], x_buoy[0, 1]], label="x0 and xT for u_D",
-                 color="r", linewidth=8)
+                 color=color[i], linewidth=8)
         plt.plot(x_coord, y_coord, label=f"buoy_{i}_movement", color="b")
 
     plt.savefig(f"{np_path}buoy_movements/frames/buoy_movement_{k}.png")

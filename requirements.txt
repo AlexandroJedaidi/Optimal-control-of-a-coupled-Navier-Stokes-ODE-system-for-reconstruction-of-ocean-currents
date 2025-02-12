@@ -14,3 +14,4 @@ vistex
 multiphenicsx
 sympy
 scifem
+imageio[ffmpeg]

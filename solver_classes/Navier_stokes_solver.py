@@ -138,7 +138,7 @@ class NavierStokes:
         problem = NonlinearProblem(F, self.w, bcs=self.bcu)
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
         solver.convergence_criterion = "incremental"
-        solver.rtol = 1e-6
+        solver.rtol = 1e-10
         solver.report = True
         solver.max_it = 100
         ksp = solver.krylov_solver

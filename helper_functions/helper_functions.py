@@ -78,48 +78,23 @@ def test_gradient(lam_, q_func, u_red, x_red, opt_iter, u_ref, ft, W, alpha, inl
         E_u = assemble_scalar(form(dot(u_red, u_red) * dx_))
         J_red = 0.5 * E_u + (alpha / 2) * E
 
-
-    # ei = np.zeros_like(q_func.x.array[:].copy())
-    # grad_J_FD,_ = Function(W).split()
-    # hh = 1e-6
-    # for i in range(ei.shape[0]):
-    #     ei = np.zeros_like(q_func.x.array[:].copy())
-    #     ei[i] = 1
-    #
-    #     qhat = Function(W)  # .split()
-    #     qhat.sub(0).x.array[:] = q_func.x.array[:] + hh * ei
-    #     # qhat = q_func + h_i.item() * dq
-    #     # qhat_expr = dolfinx.fem.Expression(qhat, U.element.interpolation_points())
-    #     # qhat_fct = dolfinx.fem.Function(U)
-    #     # qhat_fct.interpolate(qhat_expr)
-    #     w_ = NS_instance.state_solving_step(qhat.sub(0), u_ref, opt_iter)
-    #     u_, p_ = w_.split()
-    #     qnorm = form(dot(qhat.sub(0), qhat.sub(0)) * ds_(inlet_marker))
-    #     E_ = assemble_scalar(qnorm)
-    #     x_ = ODE_instance.ode_solving_step(u_)
-    #     u_values_ = np.array(evalutate_fuct(u_, x_, mesh))
-    #     dJh = 0.5 * np.sum(np.sum(h * (np.linalg.norm(np.array(u_values_) - u_d, axis=2) ** 2), axis=1)) + (
-    #             alpha / 2) * E
-    #     grad_J_FD.x.array[i] = dJh
-
     dJ = []
     for h_i in h_:
         qhat = Function(W)  # .split()
         qhat.sub(0).x.array[:] = q_func.x.array[:] + h_i.item() * dq.x.array[:]
-        # qhat = q_func + h_i.item() * dq
-        # qhat_expr = dolfinx.fem.Expression(qhat, U.element.interpolation_points())
-        # qhat_fct = dolfinx.fem.Function(U)
-        # qhat_fct.interpolate(qhat_expr)
-        w_ = NS_instance.state_solving_step(qhat.sub(0), u_ref, opt_iter)
-        u_, p_ = w_.split()
         qnorm = form(dot(qhat.sub(0), qhat.sub(0)) * ds_(inlet_marker))
         E_ = assemble_scalar(qnorm)
+
         if ODE_instance is not None:
+            w_ = NS_instance.state_solving_step(qhat.sub(0), u_ref, opt_iter)
+            u_, p_ = w_.split()
             x_ = ODE_instance.ode_solving_step(u_)
             u_values_ = np.array(evalutate_fuct(u_, x_, mesh))
             dJh = 0.5 * np.sum(np.sum(h * (np.linalg.norm(np.array(u_values_) - u_d, axis=2) ** 2), axis=1)) + (
-                    alpha / 2) * E
+                    alpha / 2) * E_
         else:
+            w_ = NS_instance(qhat.sub(0))
+            u_, p_ = w_.split()
             u_norm = form(dot(u_, u_) * dx_)
             E_u_ = assemble_scalar(u_norm)
             dJh = 0.5 * E_u_ + (alpha / 2) * E_
