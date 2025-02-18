@@ -13,6 +13,7 @@ from basix.ufl import element, mixed_element
 from dolfinx import mesh, fem, io
 import solver_classes.Navier_stokes_solver
 import solver_classes.ODE_solver
+from test_pipelines.stokes_helper import solve_stokes
 
 
 def evalutate_fuct(fct, points, mesh):
@@ -58,8 +59,9 @@ def test_gradient(lam_, q_func, u_red, x_red, opt_iter, u_ref, ft, W, alpha, inl
     dx_ = ufl.Measure('dx', domain=mesh)
     ds_ = ufl.Measure("ds", subdomain_data=ft)
     dq, _ = Function(W).split()
-    dq.x.array[:] = 0.01  # q_func.x.array[:]
-    h_ = np.array([10 ** -(i + 1) for i in range(15)])
+    dq.x.array[:] = q_func.x.array[:]
+    # h_ = np.array([0.1*i for i in range(1,10)][::-1])
+    h_ = np.array([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2][::-1])
 
     grad_j_funcp = Function(W)
     grad_j_func, _ = grad_j_funcp.split()
@@ -106,6 +108,247 @@ def test_gradient(lam_, q_func, u_red, x_red, opt_iter, u_ref, ft, W, alpha, inl
         text_file.write("reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
         for i, h_i in enumerate(h_[:-1]):
             text_file.write(f" {J_grad_red} \t {dJ[i]} \t {abs(dJ[i] - J_grad_red)} \t {h_i} \n")
+
+    return dJ[-1]
+
+
+def test_gradient_centered_finite_differences_NS(lam_, q_func, u_red, x_red, opt_iter, u_ref, ft, W, alpha,
+                                                 inlet_marker, u_d, h, NS_instance,
+                                                 ODE_instance, np_path, mesh, ds):
+    dq, _ = Function(W).split()
+
+    def dq_in(x):
+        values = np.zeros((2, x.shape[1]))
+        values[0, :] = np.where(np.isclose(x[0, :], 0.0),
+                                x[1],
+                                0.0)
+        values[1, :] = np.where(np.isclose(x[0, :], 0.0),
+                                x[1],
+                                0.0)
+        return values
+
+    dq.interpolate(dq_in)
+    h_ = np.array([10 ** (-i) for i in range(11)])
+
+    grad_j_funcp = Function(W)
+    grad_j_func, _ = grad_j_funcp.split()
+    grad_j_func.x.array[:] = alpha * q_func.x.array[:] + lam_.x.array[:]
+    red_grad = form(dot(grad_j_func, dq) * ds(inlet_marker))
+    J_grad_red = assemble_scalar(red_grad)
+
+    dJ = []
+    dJ_one_sided = []
+
+    def J(u, f_):
+        return 0.5 * np.sum(np.sum(h * (np.linalg.norm(u - u_d, axis=2) ** 2), axis=1)) + assemble_scalar(
+            form(alpha * 0.5 * inner(f_, f_) * ds(inlet_marker)))
+
+    u_values_0 = np.array(evalutate_fuct(u_red, x_red, mesh))
+    J0 = J(u_values_0, q_func)
+
+    for h_i in h_:
+        print(h_i)
+        qhatp, _ = Function(W).split()
+        qhatp.x.array[:] = q_func.x.array[:] + h_i.item() * dq.x.array[:]
+
+        w_p = NS_instance.state_solving_step(qhatp, u_ref, opt_iter)
+        u_p, p_p = w_p.split()
+        x_p = ODE_instance.ode_solving_step(u_p)
+        u_values_ = np.array(evalutate_fuct(u_p, x_p, mesh))
+        dJhp = J(u_values_, qhatp)
+
+        qhatm, _ = Function(W).split()
+        qhatm.x.array[:] = q_func.x.array[:] - h_i.item() * dq.x.array[:]
+
+        w_ = NS_instance.state_solving_step(qhatm, u_ref, opt_iter)
+        u_, p_ = w_.split()
+        x_ = ODE_instance.ode_solving_step(u_)
+        u_values_m = np.array(evalutate_fuct(u_, x_, mesh))
+        dJhm = J(u_values_m, qhatm)
+
+        approx_J = (dJhp - dJhm) / (2 * h_i.item())
+        approx_J_one_side = (dJhp - J0) / (2 * h_i.item())
+        dJ.append(approx_J)
+        dJ_one_sided.append(approx_J_one_side)
+
+    with open(np_path + f"grad_J_error_two_side_{opt_iter}.txt", "w") as text_file:
+        text_file.write("reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
+        for i, h_i in enumerate(h_[:-1]):
+            text_file.write(f" {J_grad_red} \t {dJ[i]} \t {abs(dJ[i] - J_grad_red)} \t {h_i} \n")
+
+    with open(np_path + f"grad_J_error_one_side_{opt_iter}.txt", "w") as text_file:
+        text_file.write(
+            "calculated FD inner products \t  reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
+        for i, h_i in enumerate(h_[:-1]):
+            text_file.write(f" {J_grad_red} \t {dJ_one_sided[i]} \t {abs(dJ_one_sided[i] - J_grad_red)} \t {h_i} \n")
+
+    return dJ[-1]
+
+
+def test_gradient_centered_finite_differences(z, q, opt_iter, ds, W, alpha, np_path, mesh, lhs, v, bc, u_d, u, top,
+                                              bottom, left, right):
+    dx_ = ufl.Measure('dx', domain=mesh)
+    dq, _ = Function(W).split()
+
+    def dq_in(x):
+        values = np.zeros((2, x.shape[1]))
+        if left:
+            values[0, :] = np.where(np.isclose(x[0, :], 0.0),
+                                    x[1] * (1 - x[1]),
+                                    0.0)
+            values[1, :] = np.where(np.isclose(x[0, :], 0.0),
+                                    0,
+                                    0.0)
+        if right:
+            values[0, :] = np.where(np.isclose(x[0, :], 1.0),
+                                    x[1],
+                                    0.0)
+            values[1, :] = np.where(np.isclose(x[0, :], 1.0),
+                                    x[1],
+                                    0.0)
+        if top:
+            values[0, :] = np.where(np.isclose(x[1, :], 1.0),
+                                    x[0],
+                                    0.0)
+            # np.logical_and(np.where(np.isclose(x[0, :], 0.5), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5), 10000, 0.0)))
+            values[1, :] = np.where(np.isclose(x[1, :], 1.0),
+                                    x[0],
+                                    0.0)
+        if bottom:
+            values[0, :] = np.where(np.isclose(x[1, :], 0.0),
+                                    x[0],
+                                    0.0)
+            # np.logical_and(np.where(np.isclose(x[0, :], 0.5), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5), 10000, 0.0)))
+            values[1, :] = np.where(np.isclose(x[1, :], 0.0),
+                                    x[0],
+                                    0.0)
+        return values
+
+    dq.interpolate(dq_in)
+
+    h_ = np.array([10 ** (-i) for i in range(-1, 12)])
+
+    grad_j_funcp = Function(W)
+    grad_j_func, _ = grad_j_funcp.split()
+    grad_j_func.x.array[:] = alpha * q.x.array[:] + z.x.array[:]
+    red_grad = form(dot(grad_j_func, dq) * ds(2))
+    J_grad_red = assemble_scalar(red_grad)
+
+    dJ = []
+    dJ_one_side = []
+
+    def J(u, f_):
+        return assemble_scalar(form(0.5 * inner(u - u_d, u - u_d) * dx_ + alpha * 0.5 * inner(f_, f_) * ds(2)))
+
+    J0 = J(u, q)
+    for h_i in h_:
+        print(h_i)
+        qhatp, _ = Function(W).split()
+        qhatp.x.array[:] = q.x.array[:] + h_i.item() * dq.x.array[:]
+
+        problem = dolfinx.fem.petsc.LinearProblem(lhs, inner(qhatp, v) * ds(2), bcs=bc, petsc_options={
+            "ksp_type": "preonly",
+            #"pc_type": "lu",
+            #"pc_factor_mat_solver_type": "superlu_dist",
+        })
+        w_p = problem.solve()
+        u_p, p_p = w_p.split()
+        J_p = J(u_p, qhatp)
+
+        qhatm, _ = Function(W).split()
+        qhatm.x.array[:] = q.x.array[:] - h_i.item() * dq.x.array[:]
+
+        problem_m = dolfinx.fem.petsc.LinearProblem(lhs, inner(qhatm, v) * ds(2), bcs=bc, petsc_options={
+            "ksp_type": "preonly",
+            #"pc_type": "lu",
+            #"pc_factor_mat_solver_type": "superlu_dist",
+        })
+        w_ = problem_m.solve()
+        u_, p_ = w_.split()
+        J_m = J(u_, qhatm)
+
+        approx_J = (J_p - J_m) / (2 * h_i.item())
+        approx_J_one_side = (J_p - J0) / (h_i.item())
+        dJ.append(approx_J)
+        dJ_one_side.append(approx_J_one_side)
+
+    with open(np_path + f"grad_J_error_two_side_{opt_iter}.txt", "w") as text_file:
+        text_file.write("reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
+        for i, h_i in enumerate(h_[:-1]):
+            text_file.write(f" {J_grad_red} \t {dJ[i]} \t {abs(dJ[i] - J_grad_red)} \t {h_i} \n")
+
+    with open(np_path + f"grad_J_error_one_side_{opt_iter}.txt", "w") as text_file:
+        text_file.write("reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
+        for i, h_i in enumerate(h_[:-1]):
+            text_file.write(f" {J_grad_red} \t {dJ_one_side[i]} \t {abs(dJ_one_side[i] - J_grad_red)} \t {h_i} \n")
+
+    with open(np_path + f"grad_J_FD_comparison_{opt_iter}.txt", "w") as text_file:
+        text_file.write("right side Gradient approx \t \t centered gradient approx \t Error \t \t \t h_i \n")
+        for i, h_i in enumerate(h_[:-1]):
+            text_file.write(f" {dJ_one_side[i]} \t {dJ[i]} \t {abs(dJ[i] - dJ_one_side[i])} \t {h_i} \n")
+    return dJ[-1]
+
+
+def test_gradient_centered_finite_differences_on_rhs_control(z, f, opt_iter, W, alpha, np_path, mesh, lhs, v, bc, u,
+                                                             u_d):
+    dx_ = ufl.Measure('dx', domain=mesh)
+    df, _ = Function(W).split()
+
+    def dq_in(x):
+        values = np.zeros((2, x.shape[1]))
+        values[0, :] = x[1]
+        values[1, :] = x[1]
+        return values
+
+    df.interpolate(dq_in)
+
+    h_ = np.array([10 ** (-i) for i in range(-1, 13)])
+
+    grad_j_funcp = Function(W)
+    grad_j_func, _ = grad_j_funcp.split()
+    grad_j_func.x.array[:] = alpha * f.x.array[:] + z.x.array[:]
+    red_grad = form(dot(grad_j_func, df) * dx_)
+    J_grad_red = assemble_scalar(red_grad)
+
+    dJ = []
+    dJ_one_side = []
+
+    def J(u, f_):
+        return assemble_scalar(form(0.5 * inner(u - u_d, u - u_d) * dx_ + alpha * 0.5 * inner(f_, f_) * dx_))
+
+    J0 = J(u, f)
+    for h_i in h_:
+        print(h_i)
+        fhatpp = Function(W)
+        fhatp, _ = fhatpp.split()
+        fhatp.x.array[:] = f.x.array[:] + h_i.item() * df.x.array[:]
+        problem = dolfinx.fem.petsc.LinearProblem(lhs, inner(fhatp, v) * dx_, bcs=[bc])
+        w_p = problem.solve()
+        u_p, p_p = w_p.split()
+        J_p = J(u_p, fhatp)
+
+        fhatm, _ = Function(W).split()
+        fhatm.x.array[:] = f.x.array[:] - h_i.item() * df.x.array[:]
+
+        problem_m = dolfinx.fem.petsc.LinearProblem(lhs, inner(fhatm, v) * dx_, bcs=[bc])
+        w_m = problem_m.solve()
+        u_m, p_m = w_m.split()
+        J_m = J(u_m, fhatm)
+
+        approx_J = (J_p - J_m) / (2 * h_i.item())
+        one_side_J = (J_p - J0) / h_i.item()
+        dJ.append(approx_J)
+        dJ_one_side.append(one_side_J)
+
+    with open(np_path + f"grad_J_error_two_side_{opt_iter}.txt", "w") as text_file:
+        text_file.write("reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
+        for i, h_i in enumerate(h_[:-1]):
+            text_file.write(f" {J_grad_red} \t {dJ[i]} \t {abs(dJ[i] - J_grad_red)} \t {h_i} \n")
+
+    with open(np_path + f"grad_J_error_one_side_{opt_iter}.txt", "w") as text_file:
+        text_file.write("reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
+        for i, h_i in enumerate(h_[:-1]):
+            text_file.write(f" {J_grad_red} \t {dJ_one_side[i]} \t {abs(dJ_one_side[i] - J_grad_red)} \t {h_i} \n")
 
     return dJ[-1]
 

@@ -16,13 +16,14 @@ import numpy.typing as npt
 import mesh_init
 import solver_classes.Navier_stokes_solver
 import solver_classes.ODE_solver
-from helper_functions.helper_functions import test_gradient, eval_vector_field
+from helper_functions.helper_functions import test_gradient, eval_vector_field, \
+    test_gradient_centered_finite_differences, test_gradient_centered_finite_differences_NS
 from basix.ufl import element, mixed_element
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 
 # ----------------------------------------------------------------------------------------------------------------------
-experiment_number = 23
+experiment_number = 34
 np_path = f"results/experiments/{experiment_number}/"
 # Discretization parameters
 with open("parameters.json", "r") as file:
@@ -36,32 +37,90 @@ with open("parameters.json", "r") as file:
     alpha = parameters["alpha"]
     mesh_boundary_x = parameters["mesh_boundary_x"]
     mesh_boundary_y = parameters["mesh_boundary_y"]
-    K = parameters["buoy count"]
 
 os.mkdir(np_path)
 os.mkdir(np_path + "/vector_fields")
 os.mkdir(np_path + "/q_data")
 # ----------------------------------------------------------------------------------------------------------------------
 # parameters
-num_steps = 25
+num_steps = 1
 # ----------------------------------------------------------------------------------------------------------------------
 # Mesh
-gmsh.initialize()
+# gmsh.initialize()
 gdim = 2
-# mesh, ft, inlet_marker, wall_marker = mesh_init.create_mesh(gdim)
-mesh, ft, inlet_marker, wall_marker, outlet_marker, inlet_coord, right_coord = mesh_init.create_pipe_mesh(gdim)
 
+# mesh, ft, inlet_marker, wall_marker, outlet_marker, inlet_coord, right_coord = mesh_init.create_pipe_mesh(gdim)
+mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 64, 64, dolfinx.mesh.CellType.quadrilateral)
 if not dolfinx.has_petsc:
     print("This demo requires DOLFINx to be compiled with PETSc enabled.")
     exit(0)
 
 # ----------------------------------------------------------------------------------------------------------------------
+U_el = element("Lagrange", mesh.basix_cell(), 2, shape=(mesh.geometry.dim,))
+P_el = element("Lagrange", mesh.basix_cell(), 1)
+W_el = mixed_element([U_el, P_el])
+W = functionspace(mesh, W_el)
+U, _ = W.sub(0).collapse()
+# ----------------------------------------------------------------------------------------------------------------------
+top, bottom, left, right = False, False, True, False
+tdim = mesh.topology.dim
+fdim = tdim - 1
+mesh.topology.create_connectivity(fdim, tdim)
+
+facets_bottom = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[1], 0.0))
+facets_top = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[1],1.0))
+facets_right = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[0],1.0))
+facets_left = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[0],0.0))
+
+boundary_dofs_top = dolfinx.fem.locate_dofs_topological((W.sub(0), U), fdim, facets_top)
+boundary_dofs_bottom = dolfinx.fem.locate_dofs_topological((W.sub(0), U), fdim, facets_bottom)
+boundary_dofs_right = dolfinx.fem.locate_dofs_topological((W.sub(0), U), fdim, facets_right)
+boundary_dofs_left = dolfinx.fem.locate_dofs_topological((W.sub(0), U), fdim, facets_left)
+
+def nonslip(x):
+    values = np.zeros((2, x.shape[1]))
+    return values
+
+
+u_nonslip = Function(U)
+u_nonslip.interpolate(nonslip)
+
+bcu_wall_top = dirichletbc(u_nonslip, boundary_dofs_top, W.sub(0))
+bcu_wall_bottom = dirichletbc(u_nonslip, boundary_dofs_bottom, W.sub(0))
+bcu_wall_right = dirichletbc(u_nonslip, boundary_dofs_right, W.sub(0))
+bcu_wall_left = dirichletbc(u_nonslip, boundary_dofs_left, W.sub(0))
+bc_array = [bcu_wall_left, bcu_wall_right, bcu_wall_bottom, bcu_wall_top]
+
+boundary_marker_id = [1,1,1,1]
+bcu = []
+for ir, boundary_bool in enumerate([left, right, bottom, top]):
+    if boundary_bool:
+        boundary_marker_id[ir] = 2
+    else:
+        bcu.append(bc_array[ir])
+
+
+boundaries = [(boundary_marker_id[0], lambda x: np.isclose(x[0], 0)),
+              (boundary_marker_id[1], lambda x: np.isclose(x[0], 1.0)),
+              (boundary_marker_id[2], lambda x: np.isclose(x[1], 0)),
+              (boundary_marker_id[3], lambda x: np.isclose(x[1], 1.0))]
+
+facet_indices, facet_markers = [], []
+for (marker, locator) in boundaries:
+    facets = dolfinx.mesh.locate_entities_boundary(mesh, fdim, locator)
+    facet_indices.append(facets)
+    facet_markers.append(np.full_like(facets, marker))
+facet_indices = np.hstack(facet_indices).astype(np.int32)
+facet_markers = np.hstack(facet_markers).astype(np.int32)
+sorted_facets = np.argsort(facet_indices)
+facet_tag = dolfinx.mesh.meshtags(mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
+# ----------------------------------------------------------------------------------------------------------------------
 # helper functions
 
 
 # plotting u
-x_min, x_max = 0, 2
-y_min, y_max = 0, 2
+x_min, x_max = 0, 1
+y_min, y_max = 0, 1
 
 # Define the number of points in each direction (resolution of the grid)
 x_points = 10  # Number of points in the x direction
@@ -79,53 +138,49 @@ z = np.zeros_like(x_grid)
 grid_array = np.stack([x_grid, y_grid, z], axis=-1)
 grid_array = grid_array.reshape(-1, 3)
 # ----------------------------------------------------------------------------------------------------------------------
+dx_ = ufl.Measure('dx', domain=mesh)
+ds_ = ufl.Measure("ds", subdomain_data=facet_tag)
+# ----------------------------------------------------------------------------------------------------------------------
 # init solver instances
-NS_instance = solver_classes.Navier_stokes_solver.NavierStokes(mesh, ft, inlet_marker, wall_marker, outlet_marker,
-                                                               experiment_number, np_path)
-ODE_instance = solver_classes.ODE_solver.ODE(mesh, ft, inlet_marker, wall_marker)
+NS_instance = solver_classes.Navier_stokes_solver.NavierStokes(mesh, facet_tag, 2, 1,
+                                                               experiment_number, np_path, bcu, W, U, dx_, ds_)
+ODE_instance = solver_classes.ODE_solver.ODE(mesh, facet_tag)
 
 u_d = ODE_instance.u_d
 N = ODE_instance.N
 # ----------------------------------------------------------------------------------------------------------------------
 # init q
-U_el = element("Lagrange", mesh.basix_cell(), 2, shape=(mesh.geometry.dim,))
-P_el = element("Lagrange", mesh.basix_cell(), 1)
-W_el = mixed_element([U_el, P_el])
-W = functionspace(mesh, W_el)
 qp = Function(W)
 q, _ = qp.split()
 U, _ = W.sub(0).collapse()
 
-dof_left = dolfinx.fem.locate_dofs_geometrical(U, lambda x: np.isclose(x[0], mesh_boundary_x[0]))
-dof_right = dolfinx.fem.locate_dofs_geometrical(U, lambda x: np.isclose(x[0], mesh_boundary_x[1]))
-dof_wall = dolfinx.fem.locate_dofs_geometrical(U,
-                                               lambda x:
-                                               np.isclose(x[1], mesh_boundary_y[0]) & np.isclose(x[1],
-                                                                                                 mesh_boundary_y[1]))
-
 
 def boundary_values(x):
     values = np.zeros((2, x.shape[1]))
-    # values[0, :] = np.where(np.isclose(x[0, :], 0.0), 1.0, np.where(np.isclose(x[0, :], 2.0), 1.0, 0.0))  # x-component
-    # values[1, :] = np.where(np.isclose(x[0, :], 0.0), 0.0, 0.0)  # y-component
     values[0, :] = np.where(np.isclose(x[0, :], 0.0),
-                            0.1 * (1 - (x[1] - 1) ** 2),  # * 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
+                            0.05 * (1 - (2*x[1] - 1) ** 2),  # * 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
                             # np.where(np.isclose(x[0, :], 2.0), 0.1*(1-(x[1]-1)**2),
                             0.0  # )
                             )
+
+    # values[1, :] = np.where(np.isclose(x[0, :], 0.0),
+    #                         0.05 * (1 - (2*x[1] - 1) ** 2),  # * 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
+    #                         # np.where(np.isclose(x[0, :], 2.0), 0.1*(1-(x[1]-1)**2),
+    #                         0.0  # )
+    #                         )
     return values
 
 
-qp.sub(0).interpolate(boundary_values)
+q.interpolate(boundary_values)
 
-eval_vector_field(mesh, inlet_coord, qp.sub(0), "initial_q_vectorfield_left_boundary",
-                  np_path + "q_data")  # plot q vector field left side
-eval_vector_field(mesh, right_coord, qp.sub(0), "initial_q_vectorfield_right_boundary",
-                  np_path + "q_data")  # plot q vector field right side
-eval_vector_field(mesh, inlet_coord, qp.sub(0), "initial_q_vectorfield_left_boundary", np_path + "q_data",
-                  False)  # plot q left side as side profile
-eval_vector_field(mesh, right_coord, qp.sub(0), "initial_q_vectorfield_right_boundary", np_path + "q_data",
-                  False)  # plot q left side as side profile
+# eval_vector_field(mesh, inlet_coord, q, "initial_q_vectorfield_left_boundary",
+#                   np_path + "q_data")  # plot q vector field left side
+# eval_vector_field(mesh, right_coord, q, "initial_q_vectorfield_right_boundary",
+#                   np_path + "q_data")  # plot q vector field right side
+# eval_vector_field(mesh, inlet_coord, q, "initial_q_vectorfield_left_boundary", np_path + "q_data",
+#                   False)  # plot q left side as side profile
+# eval_vector_field(mesh, right_coord, q, "initial_q_vectorfield_right_boundary", np_path + "q_data",
+#                   False)  # plot q left side as side profile
 # ----------------------------------------------------------------------------------------------------------------------
 # init plotting arrays
 q_abs = []
@@ -136,8 +191,7 @@ x_array = []
 grad_j_np = []
 u_array = []
 # ----------------------------------------------------------------------------------------------------------------------
-dx_ = ufl.Measure('dx', domain=mesh)
-ds_ = ufl.Measure("ds", subdomain_data=ft)
+
 divs_u = []
 # ----------------------------------------------------------------------------------------------------------------------
 # vtx_u_r = dolfinx.io.VTXWriter(mesh.comm, np_path + f"{experiment_number}_u_reference.bp", w_r.sub(0).collapse(), engine="BP4")
@@ -146,10 +200,10 @@ divs_u = []
 # ----------------------------------------------------------------------------------------------------------------------
 # optimization loop
 for i in range(num_steps):
-    w_r = NS_instance.solve_stokes_step(qp.sub(0))
+    w_r = NS_instance.solve_stokes_step(q)
     u_r, p_r = w_r.split()
 
-    w = NS_instance.state_solving_step(qp.sub(0), u_r, i)  # step one
+    w = NS_instance.state_solving_step(q, u_r, i)  # step one
 
     u, p = w.split()
     eval_vector_field(mesh, grid_array, u, f"u_vectorfield_{str(i)}_AFTER_ITERATION",
@@ -157,26 +211,19 @@ for i in range(num_steps):
 
     x = ODE_instance.ode_solving_step(u)  # step two
     lam_2 = ODE_instance.adjoint_ode_solving_step(u)  # step three
-    w_adj, J, u_values = NS_instance.adjoint_state_solving_step(u, lam_2, x, h, u_d, qp.sub(0), None)  # step four
+    w_adj, J, u_values = NS_instance.adjoint_state_solving_step(u, lam_2, x, h, u_d, q, None)  # step four
 
     u_adj, p_adj = w_adj.split()
 
-    if i == num_steps - 1 or i == 0:
+    if i == 0 or i == num_steps-1:
         div_u = form(div(u) ** 2 * dx_)
-        comm = u.function_space.mesh.comm
-        divs = comm.allreduce(assemble_scalar(div_u), MPI.SUM)
+        divs = assemble_scalar(div_u)
         divs_u.append(divs)
 
-    #grad_j_FD = test_gradient(u_adj, qp.sub(0), u, x, i, u_r, ft, W, alpha, inlet_marker, u_d, h, NS_instance,
-                  #ODE_instance, np_path, mesh)
+        # _ = test_gradient_centered_finite_differences_NS(u_adj, q, u, x, i, u_r, facet_tag, W, alpha, 2, u_d, h, NS_instance,
+        #               ODE_instance, np_path, mesh, ds_)
 
-    # grad_j = qp.sub(0).x.array[:] - u_adj.x.array[:]
-    grad_j_func = alpha * qp.sub(0) - u_adj
-    red_grad = form(dot(grad_j_func, qp.sub(0)) * ds_(inlet_marker))
-    J_grad_red = assemble_scalar(red_grad)
-    grad_j_np.append(J_grad_red)
-
-    qp.sub(0).x.array[:] = qp.sub(0).x.array[:] - mu * (alpha * qp.sub(0).x.array[:] - u_adj.x.array[:])
+    q.x.array[:] = q.x.array[:] - mu * (alpha * q.x.array[:] + u_adj.x.array[:])
     # qp.sub(0).x.array[:] = qp.sub(0).x.array - mu * grad_j_FD.x.array
 
     q_abs.append(sum(q.x.array))
@@ -248,14 +295,14 @@ plt.savefig(f"{np_path}buoy_0_velocity_error.png")
 plt.clf()
 
 # print inlet velocity field
-eval_vector_field(mesh, inlet_coord, qp.sub(0), "final_q_vectorfield_left_boundary", np_path + "q_data")
-eval_vector_field(mesh, right_coord, qp.sub(0), "final_q_vectorfield_right_boundary", np_path + "q_data")
-eval_vector_field(mesh, inlet_coord, qp.sub(0), "final_q_vectorfield_left_boundary", np_path + "q_data",
-                  False)  # plot q left side as side profile
-eval_vector_field(mesh, right_coord, qp.sub(0), "final_q_vectorfield_right_boundary", np_path + "q_data",
-                  False)  # plot q left side as side profile
-
-eval_vector_field(mesh, grid_array, u, "final_u_vectorfield", np_path + "vector_fields")
+# eval_vector_field(mesh, inlet_coord, qp.sub(0), "final_q_vectorfield_left_boundary", np_path + "q_data")
+# eval_vector_field(mesh, right_coord, qp.sub(0), "final_q_vectorfield_right_boundary", np_path + "q_data")
+# eval_vector_field(mesh, inlet_coord, qp.sub(0), "final_q_vectorfield_left_boundary", np_path + "q_data",
+#                   False)  # plot q left side as side profile
+# eval_vector_field(mesh, right_coord, qp.sub(0), "final_q_vectorfield_right_boundary", np_path + "q_data",
+#                   False)  # plot q left side as side profile
+#
+# eval_vector_field(mesh, grid_array, u, "final_u_vectorfield", np_path + "vector_fields")
 
 print("write u")
 vtx_u = dolfinx.io.VTXWriter(mesh.comm, np_path + f"{experiment_number}_u.bp", w.sub(0).collapse(), engine="BP4")

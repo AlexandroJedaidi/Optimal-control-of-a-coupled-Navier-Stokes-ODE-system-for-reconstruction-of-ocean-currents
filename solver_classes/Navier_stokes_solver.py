@@ -1,11 +1,13 @@
 import json
+from wsgiref.simple_server import WSGIServer
+
 import gmsh
 import dolfinx
 import mesh_init
 import ufl
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
                  as_vector, div, dot, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv,
-                 sqrt, transpose, tr, ds, TestFunctions, TrialFunctions)
+                 sqrt, transpose, tr, TestFunctions, TrialFunctions)
 from dolfinx.fem.petsc import (apply_lifting, assemble_matrix, assemble_vector,
                                create_vector, create_matrix, set_bc)
 from dolfinx import log
@@ -33,7 +35,7 @@ def petsc_vector_to_numpy(vec):
 
 class NavierStokes:
 
-    def __init__(self, mesh, ft, inlet_marker, wall_marker, outlet_marker, experiment_number, np_path):
+    def __init__(self, mesh, ft, inlet_marker, wall_marker, experiment_number, np_path, bcs, W, U, dx, ds):
         self.bcu = None
         self.np_path = np_path
         self.experiment_number = experiment_number
@@ -44,7 +46,6 @@ class NavierStokes:
         self.X = None
         self.bc = None
         self.x = None
-        self.ds = None
         self.dt = None
         self.dx = None
         self.u_d_dolfin = None
@@ -55,11 +56,11 @@ class NavierStokes:
         self.U_adj = None
         self.U = None
         self.Q = None
+        self.bcu = bcs
         self.mesh = mesh
         self.ft = ft
         self.inlet_marker = inlet_marker
         self.wall_marker = wall_marker
-        self.outlet_marker = outlet_marker
         self.fdim = mesh.topology.dim - 1
         with open("parameters.json", "r") as file:
             parameters = json.load(file)
@@ -73,9 +74,13 @@ class NavierStokes:
             self.mesh_boundary_y = parameters["mesh_boundary_y"]
             self.delta = parameters["delta"]
 
-        self.set_function_spaces()
+        self.W = W
+        self.U = U
+        self.dx = dx
+        self.ds = ds
+        #self.set_function_spaces()
         self.set_functions()
-        self.set_boundary_conditions()
+        #self.set_boundary_conditions()
 
     def set_function_spaces(self):
         U_el = element("Lagrange", self.mesh.basix_cell(), 2, shape=(self.mesh.geometry.dim,))
@@ -97,12 +102,12 @@ class NavierStokes:
 
         wall_dofs = locate_dofs_topological((self.W.sub(0), self.U), self.fdim, self.ft.find(self.wall_marker))
         bcu_wall = dirichletbc(u_nonslip, wall_dofs, self.W.sub(0))
-        self.bcu = [bcu_wall]
+        # self.bcu = [bcu_wall]
 
     def set_functions(self):
         self.w = Function(self.W)
         self.u, self.p = ufl.split(self.w)
-        # self.w.sub(0).x.array[:] = 0.0
+
         self.v, self.pr = ufl.split(TestFunction(self.W))
 
         self.w_adj = Function(self.W)
@@ -138,9 +143,9 @@ class NavierStokes:
         problem = NonlinearProblem(F, self.w, bcs=self.bcu)
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
         solver.convergence_criterion = "incremental"
-        solver.rtol = 1e-10
+        solver.rtol = 1e-15
         solver.report = True
-        solver.max_it = 100
+        solver.max_it = 1000
         ksp = solver.krylov_solver
         opts = PETSc.Options()
         option_prefix = ksp.getOptionsPrefix()
@@ -151,7 +156,7 @@ class NavierStokes:
         # opts[f"{option_prefix}pc_hypre_boomeramg_max_iter"] = 1
         # opts[f"{option_prefix}pc_hypre_boomeramg_cycle_type"] = "v"
         ksp.setFromOptions()
-        #log.set_log_level(log.LogLevel.INFO)
+        # log.set_log_level(log.LogLevel.INFO)
         n, converged = solver.solve(self.w)
         assert (converged)
         print(f"Number of interations: {n:d}")
@@ -204,7 +209,7 @@ class NavierStokes:
                     cells.append(colliding_cells.links(i)[0])
 
             u_values = u.eval(points_on_proc, cells)
-            gamma = (u_d[k, : , :] - u_values + lam_2[k,:,:])
+            gamma = (u_values - u_d[k, : , :] + lam_2[k,:,:])
             ps1 = scifem.PointSource(self.W.sub(0).sub(0), new_points, magnitude=h * gamma[:, 0])
             ps2 = scifem.PointSource(self.W.sub(0).sub(1), new_points, magnitude=h * gamma[:, 1])
             ps1.apply_to_vector(b)
@@ -252,9 +257,9 @@ class NavierStokes:
         A, rhs, J, u_values = self.set_adjoint_equation(u, lam_2, x, h, u_d, q, u_r)
         ksp = PETSc.KSP().create(self.mesh.comm)
         ksp.setOperators(A)
-        ksp.setType(PETSc.KSP.Type.PREONLY)
-        ksp.getPC().setType(PETSc.PC.Type.LU)
-        ksp.getPC().setFactorSolverType("mumps")
+        # ksp.setType(PETSc.KSP.Type.PREONLY)
+        # ksp.getPC().setType(PETSc.PC.Type.LU)
+        # ksp.getPC().setFactorSolverType("mumps")
         up = dolfinx.fem.Function(self.W)
         ksp.solve(rhs.x.petsc_vec, up.x.petsc_vec)
         up.x.scatter_forward()
