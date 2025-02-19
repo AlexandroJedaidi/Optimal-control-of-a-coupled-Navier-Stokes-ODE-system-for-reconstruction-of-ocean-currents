@@ -44,9 +44,9 @@ def create_mesh(gdim):
         boundaries = gmsh.model.getBoundary(volumes, oriented=False)
         for boundary in boundaries:
             center_of_mass = gmsh.model.occ.getCenterOfMass(boundary[0], boundary[1])
-            if np.allclose(center_of_mass, [0, H / 2, 0]) or np.allclose(center_of_mass, [L, H / 2, 0]):
+            if np.allclose(center_of_mass, [0, H / 2, 0]) :#or np.allclose(center_of_mass, [L, H / 2, 0]):
                 inflow.append(boundary[1])
-            elif np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass, [L / 2, 0, 0]):
+            if np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass, [L / 2, 0, 0]) or np.allclose(center_of_mass, [L, H / 2, 0]):
                 walls.append(boundary[1])
         # from IPython import embed
         # embed()

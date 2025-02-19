@@ -41,7 +41,7 @@ def reconstruct_mesh_points(axis):
 
 class ODE:
 
-    def __init__(self, mesh, ft, inlet_marker, wall_marker):
+    def __init__(self, mesh, ft):
         self.time_interval = None
         self.sol = None
         self.X = None
@@ -60,8 +60,6 @@ class ODE:
         self.Q = None
         self.mesh = mesh
         self.ft = ft
-        self.inlet_marker = inlet_marker
-        self.wall_marker = wall_marker
         self.fdim = mesh.topology.dim - 1
         with open("parameters.json", "r") as file:
             parameters = json.load(file)
@@ -96,10 +94,10 @@ class ODE:
                 self.u_d[k, i, 0] = ud1(self.time_interval[i])
 
     def set_primal_functions(self):
-        self.x[:, 0, 0] = np.array([1.0 for i in range(self.K)])
+        self.x[:, 0, 0] = np.array([0.2 for i in range(self.K)])
         # self.x[:, 0, 1] = np.array([0.1*i+0.1-0.1*(self.K-i) for i in range(self.K)])
         # self.x[:, 0, 1] = np.linspace(0.2,1.9,self.K)
-        self.x[:, 0, 1] = np.linspace(0.2,1.8,self.K)
+        self.x[:, 0, 1] = np.linspace(0.2,0.9,self.K)
 
     def set_adjoint_functions(self):
         self.lam_2 = np.zeros((self.K, int(self.T / self.h), self.mesh.geometry.dim))
@@ -151,8 +149,8 @@ class ODE:
                                         [grad_u_values[2].item(), grad_u_values[3].item()]])
 
                 u_values = u.eval(point, colliding_cells[0])
-                A = (np.identity(2) + self.h * grad_u_matr.T)
-                b_vec = self.lam_2[b, k + 1, :] - self.h * grad_u_matr.T @ (u_values - self.u_d[b, k, :])
+                A = (np.identity(2) - self.h * grad_u_matr.T)
+                b_vec = self.lam_2[b, k + 1, :] - self.h * grad_u_matr.T @ (self.u_d[b, k, :] - u_values)
                 self.lam_2[b, k, :] = np.linalg.solve(A, b_vec)
         return np.copy(self.lam_2)
 

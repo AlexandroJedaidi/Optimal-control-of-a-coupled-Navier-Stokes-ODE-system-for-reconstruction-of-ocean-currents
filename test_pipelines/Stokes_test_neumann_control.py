@@ -26,8 +26,8 @@ import imageio.v2 as imageio
 from stokes_helper import solve_stokes
 
 # ----------------------------------------------------------------------------------------------------------------------
-experiment_number = 150
-np_path = f"test_pipelines/results/Stokes/{experiment_number}/"
+experiment_number = 16
+np_path = f"test_pipelines/results/Stokes_neumann_control/{experiment_number}/"
 
 # Discretization parameters
 with open("parameters.json", "r") as file:
@@ -49,11 +49,8 @@ os.mkdir(np_path + "/q_data")
 num_steps = 1
 # ----------------------------------------------------------------------------------------------------------------------
 # Mesh
-# gmsh.initialize()
 gdim = 2
-# mesh, ft, inlet_marker, wall_marker = mesh_init.create_mesh(gdim)
-# mesh, ft, inlet_marker, wall_marker, outlet_marker, inlet_coord, right_coord = mesh_init.create_pipe_mesh(gdim)
-mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 32, 32, dolfinx.mesh.CellType.quadrilateral)
+mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 48, 48, dolfinx.mesh.CellType.triangle)
 # ----------------------------------------------------------------------------------------------------------------------
 # init q
 U_el = element("CG", mesh.basix_cell(), 2, shape=(mesh.geometry.dim,))
@@ -64,18 +61,18 @@ qp = Function(W)
 q, _ = qp.split()
 U, _ = W.sub(0).collapse()
 
-top, bottom, left, right = False, False, True, False
+top, bottom, left, right = False, False, False, True
 
 
 def boundary_values(x):
     values = np.zeros((2, x.shape[1]))
     if left:
         values[0, :] = np.where(np.isclose(x[0, :], 0.0),
-                                x[1],
+                                x[1]*(1-x[1]),
                                 0.0)
                                 #np.logical_and(np.where(np.isclose(x[0, :], 0.5), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5), 10000, 0.0)))
         values[1, :] = np.where(np.isclose(x[0, :], 0.0),
-                                x[1],
+                                0,
                                 0.0)
     if right:
         values[0, :] = np.where(np.isclose(x[0, :], 1.0),
@@ -199,15 +196,18 @@ v_r_adj, pr_r_adj = TestFunctions(W)
 
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
 a1 = vis * inner(grad(u_r), grad(v_r)) * dx
-b = inner(p_r, div(v_r)) * dx
-div_ = inner(pr_r, div(u_r)) * dx
+b = p_r*div(v_r) * dx
+div_ = pr_r*div(u_r) * dx
 rhs_ = inner(q, v_r) * ds(2)
 F = a1 + div_ + b
 
-problem = dolfinx.fem.petsc.LinearProblem(F, rhs_, bcs=bcu)
+problem = dolfinx.fem.petsc.LinearProblem(F, rhs_, bcs=bcu,petsc_options={
+        "ksp_type": "preonly",
+        #"pc_type": "lu",
+        #"pc_factor_mat_solver_type": "superlu_dist",
+    })
 w_s = problem.solve()
 u_s, p_s = w_s.split()
-
 
 a1_adj = vis * inner(grad(u_r_adj), grad(v_r_adj)) * dx
 b_adj = inner(p_r_adj, div(v_r_adj)) * dx
@@ -215,10 +215,13 @@ div_adj = inner(pr_r_adj, div(u_r_adj)) * dx
 rhs_adj = inner(u_s - ud, v_r_adj) * dx
 F_adj = a1_adj + div_adj + b_adj
 
-problem_adj = dolfinx.fem.petsc.LinearProblem(F_adj, rhs_adj, bcs=bcu)
+problem_adj = dolfinx.fem.petsc.LinearProblem(F_adj, rhs_adj, bcs=bcu,petsc_options={
+        "ksp_type": "preonly",
+        #"pc_type": "lu",
+        #"pc_factor_mat_solver_type": "superlu_dist",
+    })
 w_s_adj = problem_adj.solve()
 u_s_adj, p_s_adj = w_s_adj.split()
-
 # ----------------------------------------------------------------------------------------------------------------------
 i = 0
 test_gradient_centered_finite_differences(u_s_adj, q, i, ds, W, alpha, np_path, mesh, F, v_r , bcu, ud, u_s, top, bottom, left, right)

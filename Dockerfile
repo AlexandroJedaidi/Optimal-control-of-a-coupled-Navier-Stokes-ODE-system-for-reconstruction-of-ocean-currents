@@ -8,6 +8,7 @@ COPY requirements.txt /workspace/requirements.txt
 RUN python3 -m pip install --upgrade pip && \
     python3 -m pip install numpy scipy matplotlib jupyterlab  # Add other packages as needed
 
+RUN python3 -m pip install scifem
 
 # Expose Jupyter port
 EXPOSE 8888
