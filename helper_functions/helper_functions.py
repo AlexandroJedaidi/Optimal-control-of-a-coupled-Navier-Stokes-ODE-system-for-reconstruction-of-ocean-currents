@@ -11,9 +11,10 @@ import dolfinx
 import matplotlib.pyplot as plt
 from basix.ufl import element, mixed_element
 from dolfinx import mesh, fem, io
-import solver_classes.Navier_stokes_solver
+import solver_classes.Navier_stokes_solver as NS
 import solver_classes.ODE_solver
 from test_pipelines.stokes_helper import solve_stokes
+from solver_classes import multiphenicsx_NS_solver
 
 
 def evalutate_fuct(fct, points, mesh):
@@ -113,22 +114,21 @@ def test_gradient(lam_, q_func, u_red, x_red, opt_iter, u_ref, ft, W, alpha, inl
 
 
 def test_gradient_centered_finite_differences_NS(lam_, q_func, u_red, x_red, opt_iter, u_ref, ft, W, alpha,
-                                                 inlet_marker, u_d, h, NS_instance,
-                                                 ODE_instance, np_path, mesh, ds):
+                                                 inlet_marker, u_d, h, ODE_instance, np_path, mesh, ds, primal_NS_variable_package, dx, bcu, vis):
     dq, _ = Function(W).split()
 
     def dq_in(x):
         values = np.zeros((2, x.shape[1]))
         values[0, :] = np.where(np.isclose(x[0, :], 0.0),
-                                x[1],
+                                x[1] * (1 - x[1]),
                                 0.0)
-        values[1, :] = np.where(np.isclose(x[0, :], 0.0),
-                                x[1],
-                                0.0)
+        # values[1, :] = np.where(np.isclose(x[0, :], 0.0),
+        #                         0.0,
+        #                         0.0)
         return values
 
     dq.interpolate(dq_in)
-    h_ = np.array([10 ** (-i) for i in range(11)])
+    h_ = np.array([10 ** (-i) for i in range(2, 11)])
 
     grad_j_funcp = Function(W)
     grad_j_func, _ = grad_j_funcp.split()
@@ -145,13 +145,12 @@ def test_gradient_centered_finite_differences_NS(lam_, q_func, u_red, x_red, opt
 
     u_values_0 = np.array(evalutate_fuct(u_red, x_red, mesh))
     J0 = J(u_values_0, q_func)
-
     for h_i in h_:
         print(h_i)
         qhatp, _ = Function(W).split()
         qhatp.x.array[:] = q_func.x.array[:] + h_i.item() * dq.x.array[:]
-
-        w_p = NS_instance.state_solving_step(qhatp, u_ref, opt_iter)
+        w_p = multiphenicsx_NS_solver.run_monolithic(mesh, vis, bcu, qhatp, ds, 2)
+        # w_p = NS.state_solving_step(primal_NS_variable_package, qhatp, None, opt_iter,mesh, dx, ds, inlet_marker, bcu, W)
         u_p, p_p = w_p.split()
         x_p = ODE_instance.ode_solving_step(u_p)
         u_values_ = np.array(evalutate_fuct(u_p, x_p, mesh))
@@ -159,15 +158,15 @@ def test_gradient_centered_finite_differences_NS(lam_, q_func, u_red, x_red, opt
 
         qhatm, _ = Function(W).split()
         qhatm.x.array[:] = q_func.x.array[:] - h_i.item() * dq.x.array[:]
-
-        w_ = NS_instance.state_solving_step(qhatm, u_ref, opt_iter)
+        w_ = multiphenicsx_NS_solver.run_monolithic(mesh, vis, bcu, qhatm, ds, 2)
+        # w_ = NS.state_solving_step(primal_NS_variable_package, qhatm, None, opt_iter,mesh, dx, ds, inlet_marker, bcu, W)
         u_, p_ = w_.split()
         x_ = ODE_instance.ode_solving_step(u_)
         u_values_m = np.array(evalutate_fuct(u_, x_, mesh))
         dJhm = J(u_values_m, qhatm)
 
         approx_J = (dJhp - dJhm) / (2 * h_i.item())
-        approx_J_one_side = (dJhp - J0) / (2 * h_i.item())
+        approx_J_one_side = (dJhp - J0) / (h_i.item())
         dJ.append(approx_J)
         dJ_one_sided.append(approx_J_one_side)
 
@@ -248,8 +247,8 @@ def test_gradient_centered_finite_differences(z, q, opt_iter, ds, W, alpha, np_p
 
         problem = dolfinx.fem.petsc.LinearProblem(lhs, inner(qhatp, v) * ds(2), bcs=bc, petsc_options={
             "ksp_type": "preonly",
-            #"pc_type": "lu",
-            #"pc_factor_mat_solver_type": "superlu_dist",
+            # "pc_type": "lu",
+            # "pc_factor_mat_solver_type": "superlu_dist",
         })
         w_p = problem.solve()
         u_p, p_p = w_p.split()
@@ -260,8 +259,8 @@ def test_gradient_centered_finite_differences(z, q, opt_iter, ds, W, alpha, np_p
 
         problem_m = dolfinx.fem.petsc.LinearProblem(lhs, inner(qhatm, v) * ds(2), bcs=bc, petsc_options={
             "ksp_type": "preonly",
-            #"pc_type": "lu",
-            #"pc_factor_mat_solver_type": "superlu_dist",
+            # "pc_type": "lu",
+            # "pc_factor_mat_solver_type": "superlu_dist",
         })
         w_ = problem_m.solve()
         u_, p_ = w_.split()
@@ -378,7 +377,7 @@ def eval_vector_field(grid, coordinates, func, func_name, path, vector_field=Tru
             y_axis.append(y_)
             u_vec = func_eval[i][0]
             v_vec = func_eval[i][1]
-            plt.quiver(x_, y_, u_vec, v_vec, 1, angles="xy", scale_units="xy", scale=0.6, cmap="viridis")
+            plt.quiver(x_, y_, u_vec, v_vec, 1, angles="xy", scale_units="xy", scale=1, cmap="viridis")
         plt.savefig(f"{path}/{func_name}_vectorfield.png")
         plt.clf()
     else:

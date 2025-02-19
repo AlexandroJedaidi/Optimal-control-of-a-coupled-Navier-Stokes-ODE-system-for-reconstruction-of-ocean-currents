@@ -1,5 +1,7 @@
 # Imports
 import os
+from time import monotonic
+
 import gmsh
 import dolfinx
 from petsc4py import PETSc
@@ -10,20 +12,21 @@ from dolfinx.fem import (Constant, Function, functionspace,
                          assemble_scalar, dirichletbc, form, locate_dofs_topological, set_bc)
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
                  as_vector, div, dot, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv,
-                 sqrt, transpose, tr)
+                 sqrt, transpose, tr, TestFunctions, TrialFunctions)
 import numpy as np
 import numpy.typing as npt
 import mesh_init
-import solver_classes.Navier_stokes_solver
 import solver_classes.ODE_solver
 from helper_functions.helper_functions import test_gradient, eval_vector_field, \
-    test_gradient_centered_finite_differences, test_gradient_centered_finite_differences_NS
+    test_gradient_centered_finite_differences, test_gradient_centered_finite_differences_NS, evalutate_fuct
 from basix.ufl import element, mixed_element
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
+import solver_classes.Navier_stokes_solver as NS
+from solver_classes import multiphenicsx_NS_solver
 
 # ----------------------------------------------------------------------------------------------------------------------
-experiment_number = 34
+experiment_number = 102
 np_path = f"results/experiments/{experiment_number}/"
 # Discretization parameters
 with open("parameters.json", "r") as file:
@@ -43,21 +46,21 @@ os.mkdir(np_path + "/vector_fields")
 os.mkdir(np_path + "/q_data")
 # ----------------------------------------------------------------------------------------------------------------------
 # parameters
-num_steps = 1
+num_steps = 25
 # ----------------------------------------------------------------------------------------------------------------------
 # Mesh
 # gmsh.initialize()
 gdim = 2
 
 # mesh, ft, inlet_marker, wall_marker, outlet_marker, inlet_coord, right_coord = mesh_init.create_pipe_mesh(gdim)
-mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 64, 64, dolfinx.mesh.CellType.quadrilateral)
+mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 32, 32, dolfinx.mesh.CellType.triangle)
 if not dolfinx.has_petsc:
     print("This demo requires DOLFINx to be compiled with PETSc enabled.")
     exit(0)
 
 # ----------------------------------------------------------------------------------------------------------------------
-U_el = element("Lagrange", mesh.basix_cell(), 2, shape=(mesh.geometry.dim,))
-P_el = element("Lagrange", mesh.basix_cell(), 1)
+U_el = element("CG", mesh.basix_cell(), 2, shape=(mesh.geometry.dim,))
+P_el = element("CG", mesh.basix_cell(), 1)
 W_el = mixed_element([U_el, P_el])
 W = functionspace(mesh, W_el)
 U, _ = W.sub(0).collapse()
@@ -68,14 +71,15 @@ fdim = tdim - 1
 mesh.topology.create_connectivity(fdim, tdim)
 
 facets_bottom = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[1], 0.0))
-facets_top = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[1],1.0))
-facets_right = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[0],1.0))
-facets_left = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[0],0.0))
+facets_top = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[1], 1.0))
+facets_right = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[0], 1.0))
+facets_left = dolfinx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.isclose(x[0], 0.0))
 
 boundary_dofs_top = dolfinx.fem.locate_dofs_topological((W.sub(0), U), fdim, facets_top)
 boundary_dofs_bottom = dolfinx.fem.locate_dofs_topological((W.sub(0), U), fdim, facets_bottom)
 boundary_dofs_right = dolfinx.fem.locate_dofs_topological((W.sub(0), U), fdim, facets_right)
 boundary_dofs_left = dolfinx.fem.locate_dofs_topological((W.sub(0), U), fdim, facets_left)
+
 
 def nonslip(x):
     values = np.zeros((2, x.shape[1]))
@@ -91,14 +95,13 @@ bcu_wall_right = dirichletbc(u_nonslip, boundary_dofs_right, W.sub(0))
 bcu_wall_left = dirichletbc(u_nonslip, boundary_dofs_left, W.sub(0))
 bc_array = [bcu_wall_left, bcu_wall_right, bcu_wall_bottom, bcu_wall_top]
 
-boundary_marker_id = [1,1,1,1]
+boundary_marker_id = [1, 1, 1, 1]
 bcu = []
 for ir, boundary_bool in enumerate([left, right, bottom, top]):
     if boundary_bool:
         boundary_marker_id[ir] = 2
     else:
         bcu.append(bc_array[ir])
-
 
 boundaries = [(boundary_marker_id[0], lambda x: np.isclose(x[0], 0)),
               (boundary_marker_id[1], lambda x: np.isclose(x[0], 1.0)),
@@ -114,6 +117,8 @@ facet_indices = np.hstack(facet_indices).astype(np.int32)
 facet_markers = np.hstack(facet_markers).astype(np.int32)
 sorted_facets = np.argsort(facet_indices)
 facet_tag = dolfinx.mesh.meshtags(mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
+# ----------------------------------------------------------------------------------------------------------------------
+
 # ----------------------------------------------------------------------------------------------------------------------
 # helper functions
 
@@ -142,8 +147,6 @@ dx_ = ufl.Measure('dx', domain=mesh)
 ds_ = ufl.Measure("ds", subdomain_data=facet_tag)
 # ----------------------------------------------------------------------------------------------------------------------
 # init solver instances
-NS_instance = solver_classes.Navier_stokes_solver.NavierStokes(mesh, facet_tag, 2, 1,
-                                                               experiment_number, np_path, bcu, W, U, dx_, ds_)
 ODE_instance = solver_classes.ODE_solver.ODE(mesh, facet_tag)
 
 u_d = ODE_instance.u_d
@@ -158,7 +161,8 @@ U, _ = W.sub(0).collapse()
 def boundary_values(x):
     values = np.zeros((2, x.shape[1]))
     values[0, :] = np.where(np.isclose(x[0, :], 0.0),
-                            0.05 * (1 - (2*x[1] - 1) ** 2),  # * 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
+                            x[1] * (1 - x[1]),
+                            # 0.05 * (1 - (2*x[1] - 1) ** 2),  # * 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
                             # np.where(np.isclose(x[0, :], 2.0), 0.1*(1-(x[1]-1)**2),
                             0.0  # )
                             )
@@ -173,6 +177,7 @@ def boundary_values(x):
 
 q.interpolate(boundary_values)
 
+
 # eval_vector_field(mesh, inlet_coord, q, "initial_q_vectorfield_left_boundary",
 #                   np_path + "q_data")  # plot q vector field left side
 # eval_vector_field(mesh, right_coord, q, "initial_q_vectorfield_right_boundary",
@@ -182,6 +187,33 @@ q.interpolate(boundary_values)
 # eval_vector_field(mesh, right_coord, q, "initial_q_vectorfield_right_boundary", np_path + "q_data",
 #                   False)  # plot q left side as side profile
 # ----------------------------------------------------------------------------------------------------------------------
+def set_functions():
+    w = Function(W)
+    u, p = ufl.split(w)  # TrialFunctions(W)  # ufl.split( w)
+
+    # v, pr = TestFunctions(W)
+    v, pr = ufl.split(TestFunction(W))
+
+    w_adj = Function(W)
+    u_adj, p_adj = TrialFunctions(W)
+    v_adj, pr_adj = TestFunctions(W)
+
+    u_r, p_r = TrialFunctions(W)
+    v_r, pr_r = TestFunctions(W)
+
+    u_r_adj, p_r_adj = TrialFunctions(W)
+    v_r_adj, pr_r_adj = TestFunctions(W)
+
+    primal_NS_variable_package = [w, u, p, v, pr]
+    adjoint_NS_variable_package = [w_adj, u_adj, p_adj, v_adj, pr_adj]
+
+    primal_Stokes_variable_package = [u_r, p_r, v_r, pr_r]
+    adjoint_Stokes_variable_package = [u_r_adj, p_r_adj, v_r_adj, pr_r_adj]
+
+    return primal_NS_variable_package, adjoint_NS_variable_package, primal_Stokes_variable_package, adjoint_Stokes_variable_package
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 # init plotting arrays
 q_abs = []
 J_array = []
@@ -190,41 +222,39 @@ q_gamma_2 = []
 x_array = []
 grad_j_np = []
 u_array = []
-# ----------------------------------------------------------------------------------------------------------------------
-
 divs_u = []
-# ----------------------------------------------------------------------------------------------------------------------
-# vtx_u_r = dolfinx.io.VTXWriter(mesh.comm, np_path + f"{experiment_number}_u_reference.bp", w_r.sub(0).collapse(), engine="BP4")
-# vtx_u_r.write(0.0)
-# vtx_u_r.close()
 # ----------------------------------------------------------------------------------------------------------------------
 # optimization loop
 for i in range(num_steps):
-    w_r = NS_instance.solve_stokes_step(q)
-    u_r, p_r = w_r.split()
+    primal_NS_variable_package, adjoint_NS_variable_package, primal_Stokes_variable_package, adjoint_Stokes_variable_package = set_functions()
 
-    w = NS_instance.state_solving_step(q, u_r, i)  # step one
-
-    u, p = w.split()
-    eval_vector_field(mesh, grid_array, u, f"u_vectorfield_{str(i)}_AFTER_ITERATION",
+    # w_s = NS.state_solving_step(primal_NS_variable_package, q, None, i, mesh, dx_, ds_, 2, bcu, W)  # step one
+    w_s = multiphenicsx_NS_solver.run_monolithic(mesh, vis, bcu, q, ds_, 2)
+    u_s, p_s = w_s.split()
+    eval_vector_field(mesh, grid_array, u_s, f"u_vectorfield_{str(i)}_AFTER_ITERATION",
                       np_path + "vector_fields")  # plot vector fields
 
-    x = ODE_instance.ode_solving_step(u)  # step two
-    lam_2 = ODE_instance.adjoint_ode_solving_step(u)  # step three
-    w_adj, J, u_values = NS_instance.adjoint_state_solving_step(u, lam_2, x, h, u_d, q, None)  # step four
+    x = ODE_instance.ode_solving_step(u_s)  # step two
+    lam_2 = ODE_instance.adjoint_ode_solving_step(u_s)  # step three
+    w_adj_s, u_values = NS.adjoint_state_solving_step(u_s, lam_2, x, h, u_d, q, None, adjoint_NS_variable_package,
+                                                         dx_, ds_, mesh, 2, W, bcu)  # step four
 
-    u_adj, p_adj = w_adj.split()
+    u_adj_s, p_adj_s = w_adj_s.split()
 
-    if i == 0 or i == num_steps-1:
-        div_u = form(div(u) ** 2 * dx_)
+    if i == 0 or i == num_steps - 1:
+        div_u = form(div(u_s) ** 2 * dx_)
         divs = assemble_scalar(div_u)
         divs_u.append(divs)
 
-        # _ = test_gradient_centered_finite_differences_NS(u_adj, q, u, x, i, u_r, facet_tag, W, alpha, 2, u_d, h, NS_instance,
-        #               ODE_instance, np_path, mesh, ds_)
+        # _ = test_gradient_centered_finite_differences_NS(u_adj_s, q, u_s, x, i, None, facet_tag, W, alpha, 2, u_d, h,
+        #                                                  ODE_instance, np_path, mesh, ds_, primal_NS_variable_package, dx_, bcu, vis)
 
-    q.x.array[:] = q.x.array[:] - mu * (alpha * q.x.array[:] + u_adj.x.array[:])
     # qp.sub(0).x.array[:] = qp.sub(0).x.array - mu * grad_j_FD.x.array
+    u_values_ = np.array(evalutate_fuct(u_s, x, mesh))
+    J = 0.5 * np.sum(np.sum(h * (np.linalg.norm(u_values_ - u_d, axis=2) ** 2), axis=1)) + assemble_scalar(
+            form(alpha * 0.5 * inner(q, q) * ds_(2)))
+
+    q.x.array[:] = q.x.array[:] - mu * (alpha * q.x.array[:] + u_adj_s.x.array[:])
 
     q_abs.append(sum(q.x.array))
     J_array.append(J)
@@ -265,8 +295,8 @@ for k, x_ in enumerate(x_array):
     for i, x_buoy in enumerate(x_):
         x_coord = x_buoy[:, 0]
         y_coord = x_buoy[:, 1]
-        plt.xlim(0.0, 2)
-        plt.ylim(0.0, 2)
+        plt.xlim(0.0, 1)
+        plt.ylim(0.0, 1)
         plt.plot([x_buoy[0, 0], x_buoy[0, 0] + 1 / (np.pi)], [x_buoy[0, 1], x_buoy[0, 1]], label="x0 and xT for u_D",
                  color=color[i], linewidth=8)
         plt.plot(x_coord, y_coord, label=f"buoy_{i}_movement", color="b")
@@ -305,7 +335,7 @@ plt.clf()
 # eval_vector_field(mesh, grid_array, u, "final_u_vectorfield", np_path + "vector_fields")
 
 print("write u")
-vtx_u = dolfinx.io.VTXWriter(mesh.comm, np_path + f"{experiment_number}_u.bp", w.sub(0).collapse(), engine="BP4")
+vtx_u = dolfinx.io.VTXWriter(mesh.comm, np_path + f"{experiment_number}_u.bp", w_s.sub(0).collapse(), engine="BP4")
 vtx_u.write(0.0)
 vtx_u.close()
 
@@ -315,6 +345,6 @@ vtx_q.write(0.0)
 vtx_q.close()
 
 print("write p")
-vtx_p = dolfinx.io.VTXWriter(mesh.comm, np_path + f"{experiment_number}_p.bp", w.sub(1).collapse(), engine="BP4")
+vtx_p = dolfinx.io.VTXWriter(mesh.comm, np_path + f"{experiment_number}_p.bp", w_s.sub(1).collapse(), engine="BP4")
 vtx_p.write(0.0)
 vtx_p.close()

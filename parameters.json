@@ -1,6 +1,6 @@
 {
   "viscosity": 1,
-  "buoy count": 10,
+  "buoy count": 1,
   "t0": 0.0,
   "T": 1,
   "dt": 0.005,
