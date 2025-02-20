@@ -5,7 +5,7 @@ import os
 
 Nx = 32
 alpha = 1e-2
-experiment = 13
+experiment = 16
 np_path = f"results/dolfin/experiments/{experiment}/"
 os.mkdir(np_path)
 with open("parameters.json", "r") as file:
@@ -83,9 +83,9 @@ def solve_ode(wSol, grad_u):
     x = np.zeros((K, int(T / h), mesh.geometric_dimension()))
     ud1 = lambda t: 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))
     u_d = np.zeros((K, int(T / h), mesh.geometric_dimension()))
-    # for k in range(K):
-    #     for i in range(len(time_interval)):
-    #         u_d[k, i, 0] = ud1(time_interval[i])
+    for k in range(K):
+        for i in range(len(time_interval)):
+            u_d[k, i, 0] = ud1(time_interval[i])
 
     x[:, 0, 0] = np.array([0.2 for i in range(K)])
     x[:, 0, 1] = np.linspace(0.2, 0.9, K)
