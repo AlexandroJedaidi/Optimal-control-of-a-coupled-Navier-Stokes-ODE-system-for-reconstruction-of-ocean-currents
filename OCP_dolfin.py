@@ -5,8 +5,8 @@ import os
 import matplotlib.pyplot as plt
 
 Nx = 32
-experiment = 30
-num_steps = 1
+experiment = 51
+num_steps = 150
 np_path = f"results/dolfin/OCP/experiments/{experiment}/"
 os.mkdir(np_path)
 # ----------------------------------------------------------------------------------------------------------------------
@@ -15,7 +15,7 @@ with open("parameters.json", "r") as file:
     t0 = parameters["t0"]
     T = parameters["T"]
     h = parameters["dt"]
-    alpha = parameters["alpha"]
+    alpha = parameters["alpha"]  # e-2
     LR = parameters["LR"]
     viscosity = parameters["viscosity"]
     K = parameters["buoy count"]
@@ -32,7 +32,7 @@ NeumannLocation = 0
 
 class Neumann(SubDomain):
     def inside(self, x, on_boundary):
-        return on_boundary and abs(x[0]) < DOLFIN_EPS
+        return on_boundary and (abs(x[0]) < DOLFIN_EPS or abs(1 - x[0]) < DOLFIN_EPS)
         # return on_boundary and (near(x[0], 0.0))# or near(x[1],1.0))
         # if NeumannLocation == 0:
         #     return on_boundary and (abs(x[0]) < DOLFIN_EPS or abs(x[0] - 1) < DOLFIN_EPS)
@@ -66,29 +66,34 @@ W = FunctionSpace(mesh, TH)
 # ----------------------------------------------------------------------------------------------------------------------
 
 def boundary_top(x, on_boundary):
+    return on_boundary and 1 - x[1] < DOLFIN_EPS  # near(x[1],1.0)# DOLFIN_EPS or x[0] < 1 - DOLFIN_EPS)
+    # return on_boundary and near(x[1],1.0)# DOLFIN_EPS or x[0] < 1 - DOLFIN_EPS)
 
-    return on_boundary and near(x[1],1.0)# DOLFIN_EPS or x[0] < 1 - DOLFIN_EPS)
+
 # if NeumannLocation == 0:
 #     pass
 # elif NeumannLocation == 1:
 #     return on_boundary and x[0] < 1 - DOLFIN_EPS
 
 def boundary_bottom(x, on_boundary):
-    return on_boundary and near(x[1], 0.0)
+    return on_boundary and x[1] < DOLFIN_EPS
+    # return on_boundary and near(x[1], 0.0)
     # if NeumannLocation == 0:
     #     return on_boundary and (x[0] > DOLFIN_EPS or x[0] < 1 - DOLFIN_EPS)
     # elif NeumannLocation == 1:
     #     return on_boundary and x[0] < 1 - DOLFIN_EPS
+
 
 def boundary_right(x, on_boundary):
-    return on_boundary and near(x[0], 1.0)
+    return on_boundary and 1 - x[0] < DOLFIN_EPS
     # if NeumannLocation == 0:
     #     return on_boundary and (x[0] > DOLFIN_EPS or x[0] < 1 - DOLFIN_EPS)
     # elif NeumannLocation == 1:
     #     return on_boundary and x[0] < 1 - DOLFIN_EPS
 
+
 def boundary(x, on_boundary):
-    return on_boundary and x[0] > DOLFIN_EPS
+    return on_boundary and (x[0] > DOLFIN_EPS and abs(1 - x[0]) > DOLFIN_EPS)
 
 
 # bcs = [DirichletBC(W.sub(0), (0, 0), boundary_top), DirichletBC(W.sub(0), (0, 0), boundary_bottom), DirichletBC(W.sub(0), (0, 0), boundary_right)]
@@ -112,41 +117,44 @@ def solve_primal_ode(wSol):
     x[:, 0, 1] = np.linspace(0.2, 0.9, K)
 
     u_values_array = np.zeros((K, int(T / h), mesh.geometric_dimension()))
-    for b in range(K):
-        for k, t_k in enumerate(time_interval[:-1]):
+    for b_iter in range(K):
+        for k in range(int(T/h)-1):
             # print("time: " + str(t_k))
-            point = np.array([x[b, k, :][0].item(), x[b, k, :][1].item()])
+
+            point = np.array([x[b_iter, k, :][0].item(), x[b_iter, k, :][1].item()])
             u_values = wSol.sub(0)(point)
-            x[b, k + 1, :] = x[b, k, :] + h * u_values
-            u_values_array[b, k, :] = u_values
+            x[b_iter, k + 1, :] = x[b_iter, k, :] + h * u_values
+            u_values_array[b_iter, k, :] = u_values
+        u_values_array[b_iter, k+1, :] = wSol.sub(0)(np.array([x[b_iter, k+1, :][0].item(), x[b_iter, k+1, :][1].item()]))
     return x, u_values_array
 
 
 def solve_adjoint_ode(wSol, grad_u, x):
     mu = np.zeros((K, int(T / h), mesh.geometric_dimension()))
-    for b in range(K):
+    for b_iter in range(K):
         N = len(time_interval[1:])
         for k in range(N - 1, -1, -1):
-            point = np.array([x[b, k, :][0].item(), x[b, k, :][1].item()])
+            point = np.array([x[b_iter, k, :][0].item(), x[b_iter, k, :][1].item()])
             grad_u_values = grad_u(point)
             grad_u_matr = np.array([[grad_u_values[0].item(), grad_u_values[1].item()],
                                     [grad_u_values[2].item(), grad_u_values[3].item()]])
 
             u_values = wSol.sub(0)(point)
             A = (np.identity(2) + h * grad_u_matr.T)
-            b_vec = mu[b, k + 1, :] - h * grad_u_matr.T @ (u_values - u_d[b, k, :] )
-            mu[b, k, :] = np.linalg.solve(A, b_vec)
-
+            b_vec = mu[b_iter, k + 1, :] - h * grad_u_matr.T @ (u_values - u_d[b_iter, k, :])
+            mu[b_iter, k, :] = np.linalg.solve(A, b_vec)
     return mu
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 V_vec = TensorFunctionSpace(mesh, "Lagrange", 1)
+
+
 # ----------------------------------------------------------------------------------------------------------------------
-def J(u, f):
+def J(u__, f_):
     # partA = assemble(0.5 * inner(u - u_d, u - u_d) * dx)
-    partA = 0.5 * np.sum(np.sum(h * (np.linalg.norm(u - u_d, axis=2) ** 2), axis=1))
-    partB = assemble(alpha * 0.5 * inner(f, f) * ds(int(1)))
+    partA = 0.5 * np.sum(np.sum(h * (np.linalg.norm(u__ - u_d, axis=2) ** 2), axis=1))
+    partB = assemble(alpha * 0.5 * inner(f_, f_) * ds(int(1)))
     return partA + partB
 
 
@@ -170,7 +178,7 @@ def grad_test(a, v, w, J0, gradj, iter):
             # print(gradj, gradapprox, abs(gradj - gradapprox), h)
             # assemble(....)
             text_file.write(f" {gradj} \t {gradapprox} \t {abs(gradapprox - gradj)} \t {h_} \n")
-
+        text_file.close()
     with open(np_path + f"grad_J_error_centered_{iter}.txt", "w") as text_file:
         text_file.write("reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
         for k in range(3, 12):
@@ -187,7 +195,7 @@ def grad_test(a, v, w, J0, gradj, iter):
             gradapprox = (jEvalRight - jEvalLeft) / (2 * h_)
 
             text_file.write(f" {gradj} \t {gradapprox} \t {abs(gradj - gradapprox)} \t {h_} \n")
-
+        text_file.close()
 
 # ----------------------------------------------------------------------------------------------------------------------
 
@@ -244,9 +252,10 @@ for i in range(num_steps):
 
     solve(A, zrSol.vector(), b)
     # ----------------------------------------------------------------------------------------------------------------------
-    gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
-    J0 = J(u_values_array, f)
-    if i == 0 or i == num_steps-1:
+    if  i == 0:
+        gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
+        J0 = J(u_values_array, f)
+        print(J0)
         grad_test(a, v, w, J0, gradj, i)
     # ----------------------------------------------------------------------------------------------------------------------
 

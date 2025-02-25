@@ -5,9 +5,9 @@ import os
 
 Nx = 32
 alpha = 1e-2
-experiment = 16
+experiment = 20
 np_path = f"results/dolfin/experiments/{experiment}/"
-os.mkdir(np_path)
+# os.mkdir(np_path)
 with open("parameters.json", "r") as file:
     parameters = json.load(file)
     t0 = parameters["t0"]
@@ -28,7 +28,7 @@ NeumannLocation = 0
 class Neumann(SubDomain):
     def inside(self, x, on_boundary):
         if NeumannLocation == 0:
-            return on_boundary and abs(x[0]) < DOLFIN_EPS
+            return on_boundary and (abs(x[0]) < DOLFIN_EPS or abs(1-x[0])<DOLFIN_EPS)
         elif NeumannLocation == 1:
             return on_boundary and abs(x[0] - 1) < DOLFIN_EPS
 
@@ -66,7 +66,7 @@ F = a - inner(f,v)* ds(int(1))
 
 def boundary(x, on_boundary):
     if NeumannLocation == 0:
-        return on_boundary and x[0] > DOLFIN_EPS
+        return on_boundary and (x[0] > DOLFIN_EPS and abs(1-x[0]) > DOLFIN_EPS)
     elif NeumannLocation == 1:
         return on_boundary and x[0] < 1 - DOLFIN_EPS
 
@@ -157,7 +157,7 @@ def J(u, f):
 
 
 J0 = J(u_values_array, f)
-
+print(J0)
 gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
 
 
