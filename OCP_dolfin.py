@@ -5,10 +5,10 @@ import os
 import matplotlib.pyplot as plt
 
 Nx = 32
-experiment = 51
+experiment = 56
 num_steps = 150
 np_path = f"results/dolfin/OCP/experiments/{experiment}/"
-os.mkdir(np_path)
+#os.mkdir(np_path)
 # ----------------------------------------------------------------------------------------------------------------------
 with open("parameters.json", "r") as file:
     parameters = json.load(file)
@@ -198,7 +198,8 @@ def grad_test(a, v, w, J0, gradj, iter):
         text_file.close()
 
 # ----------------------------------------------------------------------------------------------------------------------
-
+tau = 0.5
+c = 1e-4
 
 for i in range(num_steps):
     w = Function(W)
@@ -252,18 +253,48 @@ for i in range(num_steps):
 
     solve(A, zrSol.vector(), b)
     # ----------------------------------------------------------------------------------------------------------------------
-    if  i == 0:
-        gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
+    gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
+    cond = - c * gradj
+    if i == 0:
         J0 = J(u_values_array, f)
-        print(J0)
-        grad_test(a, v, w, J0, gradj, i)
+        #print(J0)
+        #grad_test(a, v, w, J0, gradj, i)
     # ----------------------------------------------------------------------------------------------------------------------
+    LR = 2
+    while True:
+        print("line search")
+        J_old = J(u_values_array, f)
+        w_ls = Function(W)
+        w_test_ls = TestFunction(W)
 
+        u_ls, p_ls = split(w_ls)
+        v_ls, q_ls = split(w_test_ls)
+        f_ls = f + LR * df
+        a_ls = (inner(grad(u_ls), grad(v_ls)) + inner(dot(grad(u_ls), u_ls), v_ls) + div(u_ls) * q_ls + div(v_ls) * p_ls) * dx
+        F_ls = a_ls - inner(f + LR * df, v_ls) * ds(int(1))
+
+        solve(F_ls == 0, w_ls, bcs)
+        # ----------------------------------------------------------------------------------------------------------------------
+
+        grad_u_ls = grad(w_ls.sub(0))
+        grad_u_proj_ls = project(grad_u_ls, V_vec)
+        x_ls, u_values_array_ls = solve_primal_ode(w_ls)
+        J_new = J(u_values_array_ls, f_ls)
+        print(J_old)
+        print(J_new)
+        if J_old - J_new >= LR * cond:
+            break
+        LR = tau * LR
+    print(LR)
     f = f - LR * (alpha * f - zSol)
 
     J_array.append(J(u_values_array, f))
 
     divs_u.append(sqrt(assemble(div(u) * div(u) * dx)))
+
+    if i>0 and abs(J_array[i] - J_array[i-1]) < 1e-4:
+        print("cost small enough")
+        break
 
 # ----------------------------------------------------------------------------------------------------------------------
 with open(np_path + "u_divergence.txt", "w") as text_file:

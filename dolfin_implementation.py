@@ -28,7 +28,7 @@ NeumannLocation = 0
 class Neumann(SubDomain):
     def inside(self, x, on_boundary):
         if NeumannLocation == 0:
-            return on_boundary and (abs(x[0]) < DOLFIN_EPS or abs(1-x[0])<DOLFIN_EPS)
+            return on_boundary and (abs(x[0]) < DOLFIN_EPS )#or abs(1-x[0])<DOLFIN_EPS)
         elif NeumannLocation == 1:
             return on_boundary and abs(x[0] - 1) < DOLFIN_EPS
 
@@ -66,7 +66,7 @@ F = a - inner(f,v)* ds(int(1))
 
 def boundary(x, on_boundary):
     if NeumannLocation == 0:
-        return on_boundary and (x[0] > DOLFIN_EPS and abs(1-x[0]) > DOLFIN_EPS)
+        return on_boundary and (x[0] > DOLFIN_EPS) #and abs(1-x[0]) > DOLFIN_EPS)
     elif NeumannLocation == 1:
         return on_boundary and x[0] < 1 - DOLFIN_EPS
 
