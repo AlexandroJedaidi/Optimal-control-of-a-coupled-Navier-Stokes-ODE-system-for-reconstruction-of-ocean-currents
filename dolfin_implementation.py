@@ -5,9 +5,9 @@ import os
 
 Nx = 32
 alpha = 1e-2
-experiment = 20
+experiment = 25
 np_path = f"results/dolfin/experiments/{experiment}/"
-# os.mkdir(np_path)
+os.mkdir(np_path)
 with open("parameters.json", "r") as file:
     parameters = json.load(file)
     t0 = parameters["t0"]
@@ -103,7 +103,7 @@ def solve_ode(wSol, grad_u):
     for b in range(K):
         N = len(time_interval[1:])
         for k in range(N - 1, -1, -1):
-            point = np.array([x[b, k, :][0].item(), x[b, k, :][1].item()])
+            point = np.array([x[b, k+1, :][0].item(), x[b, k+1, :][1].item()])
             grad_u_values = grad_u(point)
             grad_u_matr = np.array([[grad_u_values[0].item(), grad_u_values[1].item()],
                                     [grad_u_values[2].item(), grad_u_values[3].item()]])
@@ -112,6 +112,7 @@ def solve_ode(wSol, grad_u):
             A = (np.identity(2) + h * grad_u_matr.T)
             b_vec = mu[b, k + 1, :] - h * grad_u_matr.T @ (u_values - u_d[b, k, :])
             mu[b, k, :] = np.linalg.solve(A, b_vec)
+            # mu[b, k, :] = mu[b, k + 1, :] - h * grad_u_matr.T @ (u_d[b, k + 1, :] - u_values - mu[b, k + 1, :])
 
     return x, mu, u_d, u_values_array
 

@@ -5,7 +5,7 @@ import os
 import matplotlib.pyplot as plt
 
 Nx = 32
-experiment = 56
+experiment = 60
 num_steps = 150
 np_path = f"results/dolfin/OCP/experiments/{experiment}/"
 #os.mkdir(np_path)
@@ -134,15 +134,16 @@ def solve_adjoint_ode(wSol, grad_u, x):
     for b_iter in range(K):
         N = len(time_interval[1:])
         for k in range(N - 1, -1, -1):
-            point = np.array([x[b_iter, k, :][0].item(), x[b_iter, k, :][1].item()])
+            point = np.array([x[b_iter, k+1, :][0].item(), x[b_iter, k+1, :][1].item()])
             grad_u_values = grad_u(point)
             grad_u_matr = np.array([[grad_u_values[0].item(), grad_u_values[1].item()],
                                     [grad_u_values[2].item(), grad_u_values[3].item()]])
 
             u_values = wSol.sub(0)(point)
-            A = (np.identity(2) + h * grad_u_matr.T)
-            b_vec = mu[b_iter, k + 1, :] - h * grad_u_matr.T @ (u_values - u_d[b_iter, k, :])
-            mu[b_iter, k, :] = np.linalg.solve(A, b_vec)
+            # A = (np.identity(2) - h * grad_u_matr.T)
+            # b_vec = mu[b_iter, k + 1, :] - h * grad_u_matr.T @ (u_values - u_d[b_iter, k, :])
+            # mu[b_iter, k, :] = np.linalg.solve(A, b_vec)
+            mu[b_iter, k, :] = mu[b_iter, k + 1, :] - h * grad_u_matr.T @ (u_values - u_d[b_iter, k+1, :] - mu[b_iter, k + 1, :])
     return mu
 
 
@@ -258,7 +259,7 @@ for i in range(num_steps):
     if i == 0:
         J0 = J(u_values_array, f)
         #print(J0)
-        #grad_test(a, v, w, J0, gradj, i)
+        grad_test(a, v, w, J0, gradj, i)
     # ----------------------------------------------------------------------------------------------------------------------
     LR = 2
     while True:
