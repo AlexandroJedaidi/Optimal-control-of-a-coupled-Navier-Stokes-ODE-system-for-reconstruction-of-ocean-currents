@@ -143,7 +143,7 @@ class NavierStokes:
         problem = NonlinearProblem(F, self.w, bcs=self.bcu)
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
         solver.convergence_criterion = "incremental"
-        solver.rtol = 1e-15
+        solver.rtol = 1e-10
         solver.report = True
         solver.max_it = 1000
         ksp = solver.krylov_solver
@@ -209,7 +209,7 @@ class NavierStokes:
                     cells.append(colliding_cells.links(i)[0])
 
             u_values = u.eval(points_on_proc, cells)
-            gamma = (u_values - u_d[k, : , :] + lam_2[k,:,:])
+            gamma = (u_d[k, : , :] -u_values + lam_2[k,:,:])
             ps1 = scifem.PointSource(self.W.sub(0).sub(0), new_points, magnitude=h * gamma[:, 0])
             ps2 = scifem.PointSource(self.W.sub(0).sub(1), new_points, magnitude=h * gamma[:, 1])
             ps1.apply_to_vector(b)
@@ -257,9 +257,9 @@ class NavierStokes:
         A, rhs, J, u_values = self.set_adjoint_equation(u, lam_2, x, h, u_d, q, u_r)
         ksp = PETSc.KSP().create(self.mesh.comm)
         ksp.setOperators(A)
-        # ksp.setType(PETSc.KSP.Type.PREONLY)
-        # ksp.getPC().setType(PETSc.PC.Type.LU)
-        # ksp.getPC().setFactorSolverType("mumps")
+        ksp.setType(PETSc.KSP.Type.PREONLY)
+        ksp.getPC().setType(PETSc.PC.Type.LU)
+        ksp.getPC().setFactorSolverType("mumps")
         up = dolfinx.fem.Function(self.W)
         ksp.solve(rhs.x.petsc_vec, up.x.petsc_vec)
         up.x.scatter_forward()

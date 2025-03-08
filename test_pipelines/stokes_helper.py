@@ -20,7 +20,7 @@ import solver_classes.Navier_stokes_solver
 import solver_classes.ODE_solver
 from basix.ufl import element, mixed_element
 import matplotlib.pyplot as plt
-import imageio.v2 as imageio
+#import imageio.v2 as imageio
 
 
 

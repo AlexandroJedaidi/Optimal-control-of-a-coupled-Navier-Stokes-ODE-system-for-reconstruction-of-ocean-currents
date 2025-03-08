@@ -8,7 +8,7 @@ alpha = 1e-2
 experiment = 25
 np_path = f"results/dolfin/experiments/{experiment}/"
 os.mkdir(np_path)
-with open("parameters.json", "r") as file:
+with open("../parameters.json", "r") as file:
     parameters = json.load(file)
     t0 = parameters["t0"]
     T = parameters["T"]

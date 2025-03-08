@@ -20,10 +20,10 @@ from helper_functions.helper_functions import test_gradient, eval_vector_field, 
     test_gradient_centered_finite_differences, test_gradient_centered_finite_differences_NS
 from basix.ufl import element, mixed_element
 import matplotlib.pyplot as plt
-import imageio.v2 as imageio
+#import imageio.v2 as imageio
 
 # ----------------------------------------------------------------------------------------------------------------------
-experiment_number = 34
+experiment_number = 25
 np_path = f"results/experiments/{experiment_number}/"
 # Discretization parameters
 with open("parameters.json", "r") as file:
@@ -38,19 +38,19 @@ with open("parameters.json", "r") as file:
     mesh_boundary_x = parameters["mesh_boundary_x"]
     mesh_boundary_y = parameters["mesh_boundary_y"]
 
-os.mkdir(np_path)
-os.mkdir(np_path + "/vector_fields")
-os.mkdir(np_path + "/q_data")
+# os.mkdir(np_path)
+# os.mkdir(np_path + "/vector_fields")
+# os.mkdir(np_path + "/q_data")
 # ----------------------------------------------------------------------------------------------------------------------
 # parameters
 num_steps = 1
 # ----------------------------------------------------------------------------------------------------------------------
 # Mesh
-# gmsh.initialize()
+gmsh.initialize()
 gdim = 2
 
-# mesh, ft, inlet_marker, wall_marker, outlet_marker, inlet_coord, right_coord = mesh_init.create_pipe_mesh(gdim)
-mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 64, 64, dolfinx.mesh.CellType.quadrilateral)
+mesh, ft, inlet_marker, wall_marker, outlet_marker, inlet_coord, right_coord = mesh_init.create_pipe_mesh(gdim)
+# mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 64, 64, dolfinx.mesh.CellType.quadrilateral)
 if not dolfinx.has_petsc:
     print("This demo requires DOLFINx to be compiled with PETSc enabled.")
     exit(0)
@@ -158,7 +158,7 @@ U, _ = W.sub(0).collapse()
 def boundary_values(x):
     values = np.zeros((2, x.shape[1]))
     values[0, :] = np.where(np.isclose(x[0, :], 0.0),
-                            0.05 * (1 - (2*x[1] - 1) ** 2),  # * 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
+                            0.1 * (1 - (x[1] - 1) ** 2),  # * 3 * x[1] * (2.0 - x[1]) / (2.0 ** 2),
                             # np.where(np.isclose(x[0, :], 2.0), 0.1*(1-(x[1]-1)**2),
                             0.0  # )
                             )
@@ -220,10 +220,10 @@ for i in range(num_steps):
         divs = assemble_scalar(div_u)
         divs_u.append(divs)
 
-        # _ = test_gradient_centered_finite_differences_NS(u_adj, q, u, x, i, u_r, facet_tag, W, alpha, 2, u_d, h, NS_instance,
-        #               ODE_instance, np_path, mesh, ds_)
+        _ = test_gradient_centered_finite_differences_NS(u_adj, q, u, x, i, u_r, facet_tag, W, alpha, 2, u_d, h, NS_instance,
+                       ODE_instance, np_path, mesh, ds_)
 
-    q.x.array[:] = q.x.array[:] - mu * (alpha * q.x.array[:] + u_adj.x.array[:])
+    q.x.array[:] = q.x.array[:] - mu * (alpha * q.x.array[:] - u_adj.x.array[:])
     # qp.sub(0).x.array[:] = qp.sub(0).x.array - mu * grad_j_FD.x.array
 
     q_abs.append(sum(q.x.array))
@@ -275,13 +275,13 @@ for k, x_ in enumerate(x_array):
     plt.clf()
 
 # create gif
-print("creating videos")
-video_path = f"{np_path}buoy_movements/buoy_animation.mp4"
-with imageio.get_writer(video_path, fps=10, format='mp4') as writer:
-    for i in range(num_steps):
-        frames_path = os.path.join(f"{np_path}buoy_movements/frames", f"buoy_movement_{i}.png")
-        image = imageio.imread(frames_path)
-        writer.append_data(image)
+# print("creating videos")
+# video_path = f"{np_path}buoy_movements/buoy_animation.mp4"
+# with imageio.get_writer(video_path, fps=10, format='mp4') as writer:
+#     for i in range(num_steps):
+#         frames_path = os.path.join(f"{np_path}buoy_movements/frames", f"buoy_movement_{i}.png")
+#         image = imageio.imread(frames_path)
+#         writer.append_data(image)
 
 ud = u_d.reshape(u_d.shape[0] * u_d.shape[1], u_d.shape[2])
 u_values = np.array(u_array)
