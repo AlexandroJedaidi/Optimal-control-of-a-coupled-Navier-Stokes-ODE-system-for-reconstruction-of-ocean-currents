@@ -3,6 +3,7 @@ import json
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+import mshr
 
 # ----------------------------------------------------------------------------------------------------------------------
 # setup
@@ -10,7 +11,7 @@ import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------------------------------------------------------------------
 Nx = 32
-experiment = 90
+experiment = 109
 num_steps = 50
 np_path = f"results/dolfin/OCP/experiments/{experiment}/"
 os.mkdir(np_path)
@@ -31,17 +32,23 @@ with open("parameters.json", "r") as file:
 # ----------------------------------------------------------------------------------------------------------------------
 # mesh = UnitSquareMesh(Nx, Nx)
 left_x = 0.0
-left_y = 4.0
-right_x = 4.0
-right_y = 4.0
-mesh = RectangleMesh(Point(left_x, left_x), Point(right_x, right_y), Nx, Nx)
-
-
+left_y = 2.0
+right_x = 2.0
+right_y = 2.0
+# mesh = RectangleMesh(Point(left_x, left_x), Point(right_x, right_y), Nx, Nx)
+Nx_t = 50
+rect1 = mshr.Rectangle(Point(0.0, 0.0), Point(2.0, 1.0))
+rect2 = mshr.Rectangle(Point(1.0, 1.0), Point(2.0, 2.0))
+rect3 = mshr.Rectangle(Point(2.0, 0.0), Point(3.0, 1.0))
+mesh = mshr.generate_mesh(rect1 + rect2 + rect3, Nx_t)
+plot(mesh)
+plt.savefig(f"{np_path}mesh.png")
+plt.clf()
 # ----------------------------------------------------------------------------------------------------------------------
 
 class Neumann(SubDomain):
     def inside(self, x, on_boundary):
-        return on_boundary and (abs(x[0]) < DOLFIN_EPS or abs(right_x - x[0]) < DOLFIN_EPS)
+        return on_boundary and (abs(x[0]) < DOLFIN_EPS or (abs(3.0 - x[0]) < DOLFIN_EPS))
 
 
 NeumannBD = Neumann()
@@ -53,7 +60,7 @@ NeumannBD.mark(boundary_function, 1)
 dx = Measure('dx', domain=mesh)
 ds = Measure('ds', domain=mesh, subdomain_data=boundary_function)
 # ----------------------------------------------------------------------------------------------------------------------
-f = Expression(('0.0', '0'), degree=2)
+f = Expression(('1', '0'), degree=2)
 # f = Expression(("near(x[0], 0.0) ? f_left_x : (near(x[0], 1.0) ? f_right_x : 0.0)",
 #                 "near(x[0], 0.0) ? f_left_y : (near(x[0], 1.0) ? f_right_y : 0.0)"),
 #                degree=1,
@@ -100,7 +107,7 @@ def boundary_right(x, on_boundary):
 
 
 def boundary(x, on_boundary):
-    return on_boundary and (x[0] > DOLFIN_EPS and abs(right_x - x[0]) > DOLFIN_EPS)
+    return on_boundary and (x[0] > DOLFIN_EPS and abs(3.0 - x[0]) > DOLFIN_EPS)
 
 
 # bcs = [DirichletBC(W.sub(0), (0, 0), boundary_top), DirichletBC(W.sub(0), (0, 0), boundary_bottom), DirichletBC(W.sub(0), (0, 0), boundary_right)]
@@ -111,60 +118,100 @@ time_interval = np.linspace(t0, T, int(T / h))
 u_d = np.zeros((K, int(T / h), mesh.geometric_dimension()))
 x_d1 = np.zeros_like(time_interval)
 x_d2 = np.zeros_like(time_interval)
-ud_type = "arc"
-
-radius = 0.3
-middle_point_x = right_x / 2 - 0.25
-middle_point_y = right_y / 2
+ud_type = "t-mesh"
 
 if ud_type == "circle":
+    radius = 0.3
+    middle_point_x = right_x / 2 - 0.25
+    middle_point_y = right_y / 2
     ud1 = lambda t, al: right_x / 2 + radius * np.cos(2 * np.pi * t + al)
     ud2 = lambda t, al: right_x / 2 + radius * np.sin(2 * np.pi * t + al)
     ud1_back = lambda t: right_x / 2 - radius * np.sin(2 * np.pi * t)
     ud2_back = lambda t: right_x / 2 - radius * np.cos(2 * np.pi * t)
 
+    x_d1 = middle_point_x + radius * np.cos(2 * np.pi * time_interval)
+    x_d2 = middle_point_y + radius * np.sin(2 * np.pi * time_interval)
 elif ud_type == "case2":
     ud1 = lambda t: 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))
     ud2 = lambda t: 0.0
     ud1_back = lambda t: - 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))
     ud2_back = lambda t: 0.0
+
+    x_d1 = 0.5 + 0.25 * np.cos(2 * np.pi * time_interval)
+    x_d2 = 0.5 + 0.25 * np.sin(2 * np.pi * time_interval)
 elif ud_type == "diag_movement":
+    xsarr = [1.0 for _ in range(K)]
+    # ysarr = np.linspace(1, 3, K)
+    ysarr = [0.5 for _ in range(K)]
     ud1 = lambda t: 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))
     ud2 = lambda t: 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))
 
+    x_d1 = [[x0, x0 + 1 / np.pi] for x0 in xsarr]
+    x_d2 = [[y0, y0 + 1 / np.pi] for y0 in ysarr]
 elif ud_type == "arc":
-    radius = 0.5
-    theta_0 = np.pi
-    theta_f = 0.0
-    def theta_t(t):
-        return theta_0 + (theta_f - theta_0) * t
+    height = 0.1
+
 
     def ud1_movement(t):
-        return -radius * np.sin(theta_t(t)) * (theta_f - theta_0)
+        return 4 / (np.sqrt(4 + 64 * height ** 2 * (t - 0.5) ** 2))
 
 
     def ud2_movement(t):
-        return radius * np.cos(theta_t(t)) * (theta_f - theta_0)
+        return (-8 * height * (t - 0.5)) / (np.sqrt(4 + 64 * height ** 2 * (t - 0.5) ** 2))
 
 
     ud1 = ud1_movement
     ud2 = ud2_movement
-    x_d1 = [1.5 + radius*np.cos(theta_t(time_interval)) for _ in range(K)]
-    x_d2 = [i + radius + radius*np.sin(theta_t(time_interval)) for i in np.linspace(1, 2, K)]
+    x_d1 = [1.0 + 2 * time_interval for _ in range(K)]
+    x_d2 = [i + height - 4 * height * (time_interval - 0.5) ** 2 for i in np.linspace(0.5, 1.5, K)]
+    # x_d2 = [2.0 + height -4*height*(time_interval - 0.5)**2 for _ in range(K)]
+elif ud_type == "s-curve":
+    umax = 1
+    A = 0.1
+    B = 0.1
+    xsarr = [1.0 for _ in range(K)]
+    ysarr = np.linspace(0.5, 1.5, K)
+
+
+    def ud1_movement(t, xs):
+        return ((xs + 2.0 - xs) + A * np.pi * np.cos(np.pi * t))  #*umax * np.sin(np.pi*t)**2
+
+
+    def ud2_movement(t, ys):
+        return ((ys + 0.25 - ys) + 2 * B * np.pi * np.cos(2 * np.pi * t))  #*umax * np.sin(np.pi*t)**2
+
+
+    ud1 = ud1_movement
+    ud2 = ud2_movement
+    x_d1 = [i + (i + 2.0 - i) * time_interval + A * np.sin(np.pi * time_interval) for i in xsarr]
+    x_d2 = [i + (i + 0.25 - i) * time_interval + B * np.sin(2 * np.pi * time_interval) for i in ysarr]
+
+elif ud_type == "t-mesh":
+    xsarr = [1.5, 1.5]
+    ysarr = [1.25, 0.5]
+
+    ud1 = [lambda t: 0.0, lambda t: 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))]
+    ud2 = [lambda t: 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi)), lambda t: 0.0]
+
+
+    x_d1 = [[1.5, 1.5],[1.5, 1.5 + 1/np.pi]]
+    x_d2 = [[1.25, 1.25+1/np.pi], [0.5, 0.5]]
 else:
     ud1 = lambda t: 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))
     ud2 = lambda t: 0.0
     ud1_back = lambda t: - 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))
     ud2_back = lambda t: 0.0
+
 for k in range(K):
-    if k == 0:
-        al = 0
-    elif k == 1:
-        al = -np.pi / 2
-    elif k == 2:
-        al = - np.pi
-    else:
-        al = -1.5 * np.pi
+    if ud_type == "circle":
+        if k == 0:
+            al = 0
+        elif k == 1:
+            al = -np.pi / 2
+        elif k == 2:
+            al = - np.pi
+        else:
+            al = -1.5 * np.pi
     for i in range(len(time_interval)):
         # if i == 0 or i == 2:
         #     u_d[k, i, 0] = ud1(time_interval[i])
@@ -172,9 +219,21 @@ for k in range(K):
         # else:
         #     u_d[k, i, 0] = ud1_back(time_interval[i])
         #     u_d[k, i, 1] = ud2_back(time_interval[i])
+        if ud_type == "s-curve":
+            u_d[k, i, 0] = ud1(time_interval[i], xsarr[k])  # , al)
+            u_d[k, i, 1] = ud2(time_interval[i], ysarr[k])  # , al)
+        elif ud_type == "t-mesh":
+            if k == 0:
+                u_d[k, i, 0] = ud1[0](time_interval[i])  # , al)
+                u_d[k, i, 1] = ud2[0](time_interval[i])  # , al)
 
-        u_d[k, i, 0] = ud1(time_interval[i])  # , al)
-        u_d[k, i, 1] = ud2(time_interval[i])  # , al)
+            else:
+                u_d[k, i, 0] = ud1[1](time_interval[i])  # , al)
+                u_d[k, i, 1] = ud2[1](time_interval[i])  # , al)
+
+        else:
+            u_d[k, i, 0] = ud1(time_interval[i])  # , al)
+            u_d[k, i, 1] = ud2(time_interval[i])  # , al)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -190,8 +249,9 @@ def solve_primal_ode(wSol):
     # x[2, 0, 1] = middle_point_y - radius
     # x[3, 0, 0] = middle_point_x - radius
     # x[3, 0, 1] = middle_point_y
-    x[:, 0, 0] = np.array([1.5 for i in range(K)])
-    x[:, 0, 1] = np.linspace(1, 2, K)
+    x[:, 0, 0] = xsarr  #np.array([1.0 for i in range(K)])
+    # x[:, 0, 1] = np.array([2.0 for i in range(K)])
+    x[:, 0, 1] = ysarr  #np.linspace(0.5, 1.5, K)
 
     u_values_array = np.zeros((K, int(T / h), mesh.geometric_dimension()))
     for b_iter in range(K):
@@ -413,6 +473,9 @@ with open(np_path + "u_divergence.txt", "w") as text_file:
 # ----------------------------------------------------------------------------------------------------------------------
 # parameter output
 with open(np_path + "variables.txt", "w") as text_file:
+    text_file.write("mesh resolution: %s \n" % Nx)
+    text_file.write("mesh t shape resolution: %s \n" % Nx_t)
+    text_file.write("ud type: %s \n" % ud_type)
     text_file.write("t0: %s \n" % t0)
     text_file.write("T: %s \n" % T)
     text_file.write("dt: %s \n" % h)
@@ -425,26 +488,18 @@ with open(np_path + "variables.txt", "w") as text_file:
 print("plotting")
 plt.plot(J_array)
 plt.savefig(f"{np_path}J.png")
-
 plt.clf()
 
 os.mkdir(np_path + "buoy_movements")
 os.mkdir(np_path + "buoy_movements/frames")
-
-if ud_type == "circle":
-    x_d1 = middle_point_x + radius * np.cos(2 * np.pi * time_interval)
-    x_d2 = middle_point_y + radius * np.sin(2 * np.pi * time_interval)
-elif ud_type == "case2":
-    x_d1 = 0.5 + 0.25 * np.cos(2 * np.pi * time_interval)
-    x_d2 = 0.5 + 0.25 * np.sin(2 * np.pi * time_interval)
 
 for k, x_ in enumerate(x_array):
     color = plt.cm.rainbow(np.linspace(0, 1, K))
     for i, x_buoy in enumerate(x_):
         x_coord = x_buoy[:, 0]
         y_coord = x_buoy[:, 1]
-        plt.xlim(0.0, right_x)
-        plt.ylim(0.0, right_y)
+        plt.xlim(0.0, 3)
+        plt.ylim(0.0, 3)
         ax = plt.gca()
         ax.set_aspect('equal', adjustable='box')
         # if i == 0 or i == 2:
