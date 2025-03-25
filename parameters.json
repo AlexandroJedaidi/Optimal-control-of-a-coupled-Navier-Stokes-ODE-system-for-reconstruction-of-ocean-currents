@@ -1,11 +1,11 @@
 {
   "viscosity": 1,
-  "buoy count": 2,
+  "buoy count": 4,
   "t0": 0.0,
   "T": 1,
   "dt": 0.005,
   "alpha": 1e-6,
-  "LR": 3,
+  "LR": 5,
   "mesh_boundary_x": [0.9, 1.1],
   "mesh_boundary_y": [0.9, 1.1],
   "delta": 10e-6

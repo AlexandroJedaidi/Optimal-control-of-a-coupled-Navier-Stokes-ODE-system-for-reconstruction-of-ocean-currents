@@ -4,6 +4,7 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 import mshr
+import os
 
 # ----------------------------------------------------------------------------------------------------------------------
 # setup
@@ -11,7 +12,8 @@ import mshr
 
 # ----------------------------------------------------------------------------------------------------------------------
 Nx = 32
-experiment = 109
+experiment = 120
+ud_experiment = 6
 num_steps = 50
 np_path = f"results/dolfin/OCP/experiments/{experiment}/"
 os.mkdir(np_path)
@@ -35,15 +37,33 @@ left_x = 0.0
 left_y = 2.0
 right_x = 2.0
 right_y = 2.0
-# mesh = RectangleMesh(Point(left_x, left_x), Point(right_x, right_y), Nx, Nx)
+#mesh = RectangleMesh(Point(left_x, left_x), Point(right_x, right_y), Nx, Nx)
 Nx_t = 50
-rect1 = mshr.Rectangle(Point(0.0, 0.0), Point(2.0, 1.0))
-rect2 = mshr.Rectangle(Point(1.0, 1.0), Point(2.0, 2.0))
-rect3 = mshr.Rectangle(Point(2.0, 0.0), Point(3.0, 1.0))
+rect1 = mshr.Rectangle(Point(0.0, 0.0), Point(1.0, 1.0))
+rect2 = mshr.Rectangle(Point(1.0, 0.0), Point(2.0, 2.0))
+rect3 = mshr.Rectangle(Point(2.0, 0.0), Point(3.0, 0.8))
 mesh = mshr.generate_mesh(rect1 + rect2 + rect3, Nx_t)
+plt.title(r"discretized domain $\Omega_h$")
+plt.xlabel("x")
+plt.ylabel("y")
 plot(mesh)
 plt.savefig(f"{np_path}mesh.png")
 plt.clf()
+mesh_boundary = [[[0.0, 3.0], [0.0, 0.0]],    # t mesh lines    ___
+                 [[0.0, 0.0], [0.0, 1.0]],                      # |
+                 [[0.0, 1.0], [1.0, 1.0]],                      # _
+                 [[2.0, 3.0], [1.0, 1.0]],
+                 [[1.0, 2.0], [2.0, 2.0]],
+                 [[1.0, 1.0], [1.0, 2.0]],
+                 [[2.0, 2.0], [1.0, 2.0]],
+                 [[3.0, 3.0], [0.0, 1.0]]]
+#
+# mesh_boundary = [[[0.0, 2.0], [0.0, 0.0]],
+#                  [[0.0, 0.0], [0.0, 2.0]],
+#                  [[0.0, 2.0], [2.0, 2.0]],
+#                  [[2.0, 2.0], [2.0, 0.0]]]
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 
 class Neumann(SubDomain):
@@ -60,12 +80,15 @@ NeumannBD.mark(boundary_function, 1)
 dx = Measure('dx', domain=mesh)
 ds = Measure('ds', domain=mesh, subdomain_data=boundary_function)
 # ----------------------------------------------------------------------------------------------------------------------
-f = Expression(('1', '0'), degree=2)
+f = Expression(('0', '0'), degree=2)
 # f = Expression(("near(x[0], 0.0) ? f_left_x : (near(x[0], 1.0) ? f_right_x : 0.0)",
 #                 "near(x[0], 0.0) ? f_left_y : (near(x[0], 1.0) ? f_right_y : 0.0)"),
 #                degree=1,
 #                f_left_x=0.1, f_left_y=0.0,   # Left boundary: (1,0)
 #                f_right_x=-0.1, f_right_y=0.0)
+# f_x = Expression("alpha * sin(pi*x[0]) * cos(pi*x[1])", alpha=1.0, degree=2)
+# f_y = Expression("-alpha * cos(pi*x[0]) * sin(pi*x[1])", alpha=1.0, degree=2)
+# f = as_vector([f_x, f_y])
 df = Expression(('0.1', '0.1'), degree=2)
 
 
@@ -174,11 +197,11 @@ elif ud_type == "s-curve":
 
 
     def ud1_movement(t, xs):
-        return ((xs + 2.0 - xs) + A * np.pi * np.cos(np.pi * t))  #*umax * np.sin(np.pi*t)**2
+        return ((xs + 2.0 - xs) + A * np.pi * np.cos(np.pi * t))  # *umax * np.sin(np.pi*t)**2
 
 
     def ud2_movement(t, ys):
-        return ((ys + 0.25 - ys) + 2 * B * np.pi * np.cos(2 * np.pi * t))  #*umax * np.sin(np.pi*t)**2
+        return ((ys + 0.25 - ys) + 2 * B * np.pi * np.cos(2 * np.pi * t))  # *umax * np.sin(np.pi*t)**2
 
 
     ud1 = ud1_movement
@@ -187,20 +210,32 @@ elif ud_type == "s-curve":
     x_d2 = [i + (i + 0.25 - i) * time_interval + B * np.sin(2 * np.pi * time_interval) for i in ysarr]
 
 elif ud_type == "t-mesh":
-    xsarr = [1.5, 1.5]
-    ysarr = [1.25, 0.5]
+    xsarr = [1.5, 1.5, 0.5, 0.5, 0.5]
+    ysarr = [1.25, 0.5, 0.75, 0.5, 0.25]
 
     ud1 = [lambda t: 0.0, lambda t: 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))]
     ud2 = [lambda t: 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi)), lambda t: 0.0]
 
-
-    x_d1 = [[1.5, 1.5],[1.5, 1.5 + 1/np.pi]]
-    x_d2 = [[1.25, 1.25+1/np.pi], [0.5, 0.5]]
-else:
+    x_d1 = [[1.5, 1.5], [1.5, 1.5 + 1 / np.pi], [0.5, 0.5 + 1 / np.pi], [0.5, 0.5 + 1 / np.pi], [0.5, 0.5 + 1 / np.pi]]
+    x_d2 = [[1.25, 1.25 + 1 / np.pi], [0.5, 0.5], [0.75, 0.75], [0.5, 0.5], [0.25, 0.25]]
+elif ud_type == "custom_ud":
+    with open(f"results/dolfin/OCP/ud_construction/{ud_experiment}/u_d_array.npy", "rb") as ud_reader:
+        u_d = np.load(ud_reader)
+    with open(f"results/dolfin/OCP/ud_construction/{ud_experiment}/x_0_array.npy", "rb") as ud_reader:
+        temp = np.load(ud_reader)
+        x_d1 = temp[:, :, 0]
+        x_d2 = temp[:, :, 1]
+        xsarr = temp[0:K+1, 0, 0]
+        ysarr = temp[0:K+1, 0, 1]
+else:  # horizontal movement
+    xsarr = [1.0 for _ in range(K)]
+    ysarr = np.linspace(1, 2, K)
     ud1 = lambda t: 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))
     ud2 = lambda t: 0.0
     ud1_back = lambda t: - 0.5 * (np.cos(np.pi * (t - 0.5)) - 1 - np.cos(np.pi))
     ud2_back = lambda t: 0.0
+    x_d1 = [[x0, x0 + 1 / np.pi] for x0 in xsarr]
+    x_d2 = [[y0, y0] for y0 in ysarr]
 
 for k in range(K):
     if ud_type == "circle":
@@ -223,7 +258,7 @@ for k in range(K):
             u_d[k, i, 0] = ud1(time_interval[i], xsarr[k])  # , al)
             u_d[k, i, 1] = ud2(time_interval[i], ysarr[k])  # , al)
         elif ud_type == "t-mesh":
-            if k == 0:
+            if k != 1:
                 u_d[k, i, 0] = ud1[0](time_interval[i])  # , al)
                 u_d[k, i, 1] = ud2[0](time_interval[i])  # , al)
 
@@ -231,9 +266,31 @@ for k in range(K):
                 u_d[k, i, 0] = ud1[1](time_interval[i])  # , al)
                 u_d[k, i, 1] = ud2[1](time_interval[i])  # , al)
 
-        else:
+        elif ud_type != "custom_ud":
             u_d[k, i, 0] = ud1(time_interval[i])  # , al)
             u_d[k, i, 1] = ud2(time_interval[i])  # , al)
+
+    plt.title(r"requested velocity $u_d$" + f" for buoy {k + 1}")
+    plt.xlabel("Time")
+    plt.ylabel("Velocity")
+    plt.plot(time_interval, u_d[k, :, 0], label=r"$u_{1}$")
+    plt.plot(time_interval, u_d[k, :, 1], label=r"$u_{2}$")
+
+    plt.legend(loc="upper right")
+    plt.savefig(f"{np_path}ud_plot_buoy_{k}.png")
+    plt.clf()
+
+plt.title(r"requested buoy movement $x$")
+plt.xlabel(r"$x_1$")
+plt.ylabel(r"$x_2$")
+ax = plt.gca()
+ax.set_aspect('equal', adjustable='box')
+for k in range(K):
+    plt.plot(x_d1[k], x_d2[k], label=r"$x$ of buoy " + f"{k + 1}")
+for line in mesh_boundary:
+    plt.plot(line[0], line[1], color="gray")
+plt.legend(loc="upper right")
+plt.savefig(f"{np_path}x_plot_buoys.png")
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -249,9 +306,9 @@ def solve_primal_ode(wSol):
     # x[2, 0, 1] = middle_point_y - radius
     # x[3, 0, 0] = middle_point_x - radius
     # x[3, 0, 1] = middle_point_y
-    x[:, 0, 0] = xsarr  #np.array([1.0 for i in range(K)])
+    x[:, 0, 0] = xsarr  # np.array([1.0 for i in range(K)])
     # x[:, 0, 1] = np.array([2.0 for i in range(K)])
-    x[:, 0, 1] = ysarr  #np.linspace(0.5, 1.5, K)
+    x[:, 0, 1] = ysarr  # np.linspace(0.5, 1.5, K)
 
     u_values_array = np.zeros((K, int(T / h), mesh.geometric_dimension()))
     for b_iter in range(K):
@@ -416,41 +473,41 @@ for i in range(num_steps):
     solve(A, zrSol.vector(), b)
     # ----------------------------------------------------------------------------------------------------------------------
     # gradient check
-    # gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
+    gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
     if i == 0:
         J0 = J(u_values_array, f)
         # print(J0)
         # grad_test(a, v, w, J0, gradj, i)
     # ----------------------------------------------------------------------------------------------------------------------
     # line search for gradient update
-    # checkpoint = LR
-    # LR = 1
-    # if checkpoint < LR:
-    #     LR = checkpoint/tau
-    # cond = - c * gradj
-    # while True:
-    #     print("line search at " + str(LR))
-    #     J_old = J(u_values_array, f)
-    #     w_ls = Function(W)
-    #     w_test_ls = TestFunction(W)
-    #
-    #     u_ls, p_ls = split(w_ls)
-    #     v_ls, q_ls = split(w_test_ls)
-    #     f_ls = f + LR * df
-    #     a_ls = (inner(grad(u_ls), grad(v_ls)) + inner(dot(grad(u_ls), u_ls), v_ls) + div(u_ls) * q_ls + div(
-    #         v_ls) * p_ls) * dx - 0.5 * (dot(dot(u_ls, n) * u_ls, v_ls)) * ds(int(1))
-    #     F_ls = a_ls - inner(f + LR * df, v_ls) * ds(int(1))
-    #
-    #     solve(F_ls == 0, w_ls, bcs)
-    #     # ----------------------------------------------------------------------------------------------------------------------
-    #
-    #     grad_u_ls = grad(w_ls.sub(0))
-    #     grad_u_proj_ls = project(grad_u_ls, V_vec)
-    #     x_ls, u_values_array_ls = solve_primal_ode(w_ls)
-    #     J_new = J(u_values_array_ls, f_ls)
-    #     if J_old - J_new >= LR * cond:
-    #         break
-    #     LR = tau * LR
+    checkpoint = LR
+    LR = 5
+    if checkpoint < LR:
+        LR = checkpoint/tau
+    cond = - c * gradj
+    while True:
+        print("line search at " + str(LR))
+        J_old = J(u_values_array, f)
+        w_ls = Function(W)
+        w_test_ls = TestFunction(W)
+
+        u_ls, p_ls = split(w_ls)
+        v_ls, q_ls = split(w_test_ls)
+        f_ls = f + LR * df
+        a_ls = (inner(grad(u_ls), grad(v_ls)) + inner(dot(grad(u_ls), u_ls), v_ls) + div(u_ls) * q_ls + div(
+            v_ls) * p_ls) * dx - 0.5 * (dot(dot(u_ls, n) * u_ls, v_ls)) * ds(int(1))
+        F_ls = a_ls - inner(f + LR * df, v_ls) * ds(int(1))
+
+        solve(F_ls == 0, w_ls, bcs)
+        # ----------------------------------------------------------------------------------------------------------------------
+
+        grad_u_ls = grad(w_ls.sub(0))
+        grad_u_proj_ls = project(grad_u_ls, V_vec)
+        x_ls, u_values_array_ls = solve_primal_ode(w_ls)
+        J_new = J(u_values_array_ls, f_ls)
+        if J_old - J_new >= LR * cond:
+            break
+        LR = tau * LR
     #
     # control update
     f = f - LR * (alpha * f - zSol)
@@ -486,6 +543,7 @@ with open(np_path + "variables.txt", "w") as text_file:
 # ----------------------------------------------------------------------------------------------------------------------
 # plotting
 print("plotting")
+plt.clf()
 plt.plot(J_array)
 plt.savefig(f"{np_path}J.png")
 plt.clf()
@@ -495,31 +553,28 @@ os.mkdir(np_path + "buoy_movements/frames")
 
 for k, x_ in enumerate(x_array):
     color = plt.cm.rainbow(np.linspace(0, 1, K))
+    plt.xlabel(r"$x_1$")
+    plt.ylabel(r"$x_2$")
+    plt.title(r"Buoy movement result $x$")
     for i, x_buoy in enumerate(x_):
         x_coord = x_buoy[:, 0]
         y_coord = x_buoy[:, 1]
-        plt.xlim(0.0, 3)
-        plt.ylim(0.0, 3)
+        # plt.xlim(0.0, 3)
+        # plt.ylim(0.0, 3)
         ax = plt.gca()
         ax.set_aspect('equal', adjustable='box')
-        # if i == 0 or i == 2:
-        #     plt.plot([x_buoy[0, 0], x_buoy[0, 0] + 1 / (np.pi)], [x_buoy[0, 1], x_buoy[0, 1]], label="x0 and xT for u_D",
-        #              color=color[i], linewidth=2)
-        # else:
-        #     plt.plot([x_buoy[0, 0], x_buoy[0, 0] - 1 / (np.pi)], [x_buoy[0, 1], x_buoy[0, 1]],
-        #              label="x0 and xT for u_D",
-        #              color=color[i], linewidth=2)
-        # plt.plot([x_buoy[0, 0], x_buoy[0, 0] + 1 / (np.pi)], [x_buoy[0, 1], x_buoy[0, 1] + 1 / (np.pi)],
-        #          label="x0 and xT for u_D",
-        #          color=color[i], linewidth=2)
-        plt.plot(x_d1[i], x_d2[i], label="x0 and xT for u_D",
-                 color=color[i], linewidth=2)
-        plt.plot(x_coord, y_coord, label=f"buoy_{i}_movement", color="b")
+        plt.plot(x_d1[i], x_d2[i], label=r"$x_d$", color="black", linewidth=2)
+        plt.plot(x_coord, y_coord, label=r"$x$ for buoy" + f"{i + 1}", color="b")
 
+    for line in mesh_boundary:
+        plt.plot(line[0], line[1], color="gray")
+    plt.legend(loc="upper right")
     plt.savefig(f"{np_path}buoy_movements/frames/buoy_movement_{k}.png")
     plt.clf()
 
-c = plot(u, title="u_field")
+c = plot(u, title=r"Velocity field $u$")
 plt.colorbar(c)
+plt.xlabel(r"$x_1$")
+plt.ylabel(r"$x_2$")
 plt.savefig(f"{np_path}u_field.png")
 plt.clf()
