@@ -14,7 +14,7 @@ plt.rcParams["mathtext.fontset"] = "cm"
 
 # ----------------------------------------------------------------------------------------------------------------------
 Nx = 32
-experiment = 26
+experiment = 30
 num_steps = 1
 np_path = f"results/dolfin/OCP/ud_construction/{experiment}/"
 os.mkdir(np_path)
@@ -116,7 +116,7 @@ def solve_primal_ode(wSol):
                                  np.linspace(1.25, 1.75, 3))
     x_temp2, y_temp2 = np.meshgrid(np.linspace(0.75, 1.25, 2),
                                    np.linspace(0.25, 0.75, 2))
-    x_temp3, y_temp3 = np.meshgrid(np.linspace(0.1, 0.25, 10),
+    x_temp3, y_temp3 = np.meshgrid(np.linspace(0.1, 0.4, 1),
                                    np.linspace(0.25, 1.75, 10))
 
     # x[:, 0, 0] = np.concatenate([x_temp.flatten(), x_temp2.flatten()])
@@ -160,7 +160,7 @@ w_test = TestFunction(W)
 u, p = split(w)
 v, q = split(w_test)
 n = FacetNormal(mesh)
-a = (inner(grad(u), grad(v)) + inner(dot(grad(u), u), v) + div(u) * q + div(v) * p) * dx - 0.5 * (
+a = (viscosity*inner(grad(u), grad(v)) + inner(dot(grad(u), u), v) + div(u) * q + div(v) * p) * dx - 0.5 * (
     dot(dot(u, n) * u, v)) * ds(int(1))
 F = a - inner(F_rhs, v) * ds(int(1))
 
@@ -211,7 +211,7 @@ for k, x_ in enumerate(x_array):
         # plt.ylim(0.0, 3)
         ax = plt.gca()
         ax.set_aspect('equal', adjustable='box')
-        plt.plot(x_d1[i], x_d2[i], label=r"$x_d$", color="black", linewidth=2)
+        # plt.plot(x_d1[i], x_d2[i], label=r"$x_d$", color="black", linewidth=2)
         plt.plot(x_coord, y_coord, label=r"$x$ for buoy" + f"{k + 1}", color="b")
 
     for line in mesh_boundary:

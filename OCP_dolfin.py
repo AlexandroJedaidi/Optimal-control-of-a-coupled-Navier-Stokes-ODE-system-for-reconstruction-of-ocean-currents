@@ -5,6 +5,7 @@ import os
 import matplotlib.pyplot as plt
 import mshr
 import os
+import time
 
 plt.rcParams["font.family"] = "TeX Gyre Heros"
 plt.rcParams["mathtext.fontset"] = "cm"
@@ -14,10 +15,11 @@ plt.rcParams["mathtext.fontset"] = "cm"
 
 # ----------------------------------------------------------------------------------------------------------------------
 Nx = 32
-experiment = 149
-ud_experiment = 26  # "6_4b"
+experiment = 217
+ud_experiment = 14  # "6_4b"
 num_steps = 200
 np_path = f"results/dolfin/OCP/experiments/{experiment}/"
+timing_file = f"{np_path}timings.txt"
 os.mkdir(np_path)
 # ----------------------------------------------------------------------------------------------------------------------
 with open("parameters.json", "r") as file:
@@ -94,7 +96,7 @@ NeumannBD.mark(boundary_function, 1)
 dx = Measure('dx', domain=mesh)
 ds = Measure('ds', domain=mesh, subdomain_data=boundary_function)
 # ----------------------------------------------------------------------------------------------------------------------
-f = Expression(('0.1', '0.0'), degree=2)
+# f = Expression(('0.1', '0.0'), degree=2)
 # f = Expression(("near(x[0], 0.0) ? f_left_x : (near(x[0], 1.0) ? f_right_x : 0.0)",
 #                 "near(x[0], 0.0) ? f_left_y : (near(x[0], 1.0) ? f_right_y : 0.0)"),
 #                degree=1,
@@ -102,28 +104,10 @@ f = Expression(('0.1', '0.0'), degree=2)
 #                f_right_x=-0.1, f_right_y=0.0)
 # f_x = Expression("alpha * sin(pi*x[0]) * cos(pi*x[1])", alpha=1.0, degree=2)
 # f_y = Expression("-alpha * cos(pi*x[0]) * sin(pi*x[1])", alpha=1.0, degree=2)
-# f_x = Expression("-cos(pi*x[0])*sin(pi*x[1])", degree=1)
-# f_y = Expression("sin(pi*x[0])*cos(pi*x[1])", degree=1)
-# f = as_vector([f_x, f_y])
+f_x = Expression("-cos(pi*x[0])*sin(pi*x[1])", degree=1)
+f_y = Expression("sin(pi*x[0])*cos(pi*x[1])", degree=1)
+f = as_vector([f_x, f_y])
 df = Expression(('0.1', '0.1'), degree=2)
-
-
-class MyVectorExpression(UserExpression):
-    def eval(self, values, x):
-        if near(x[0], 0.0):  # Left boundary
-            values[0] = 1  # x-component
-            values[1] = 1.0 * np.sin(np.pi * x[1] / right_y)  # y-component
-        elif near(x[0], right_x):  # Right boundary
-            values[0] = -1
-            values[1] = -1.0 * np.sin(np.pi * x[1] / right_y)
-        else:  # Interior            values[0] = 0.0
-            values[1] = 0.0
-
-    def value_shape(self):
-        return (2,)  # 2D vector
-
-
-# f = MyVectorExpression(degree=1)
 # ----------------------------------------------------------------------------------------------------------------------
 P2 = VectorElement('CG', triangle, 2)
 P1 = FiniteElement('CG', triangle, 1)
@@ -143,23 +127,10 @@ if load_q:
 
 # ----------------------------------------------------------------------------------------------------------------------
 
-def boundary_top(x, on_boundary):
-    return on_boundary and right_y - x[1] < DOLFIN_EPS
-
-
-def boundary_bottom(x, on_boundary):
-    return on_boundary and x[1] < DOLFIN_EPS
-
-
-def boundary_right(x, on_boundary):
-    return on_boundary and 1 - x[0] < DOLFIN_EPS
-
-
 def boundary(x, on_boundary):
     return on_boundary and (x[0] > DOLFIN_EPS and abs(2.0 - x[0]) > DOLFIN_EPS)
 
 
-# bcs = [DirichletBC(W.sub(0), (0, 0), boundary_top), DirichletBC(W.sub(0), (0, 0), boundary_bottom), DirichletBC(W.sub(0), (0, 0), boundary_right)]
 bcs = [DirichletBC(W.sub(0), (0, 0), boundary)]
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -387,7 +358,7 @@ def solve_adjoint_ode(wSol, grad_u, x, buoy_mask):
                 # grad_u_matr = np.array([[0.0, 0.0],
                 #                         [0.0, 0.0]])
             mu[b_iter, k, :] = mu[b_iter, k + 1, :] - h * grad_u_matr.T @ (
-                    u_values - u_d[b_iter, k + 1, :] - mu[b_iter, k + 1, :])
+                (u_values - u_d[b_iter, k + 1, :])/1 - mu[b_iter, k + 1, :])
     return mu
 
 
@@ -401,7 +372,7 @@ V_vec = TensorFunctionSpace(mesh, "Lagrange", 1)
 
 def J(u__, f_):
     # partA = assemble(0.5_2b * inner(u - u_d, u - u_d) * dx)
-    partA = 0.5 * np.sum(np.sum(h * (np.linalg.norm(u__ - u_d, axis=2) ** 2), axis=1))
+    partA = (0.5/1) * np.sum(np.sum(h * (np.linalg.norm(u__ - u_d, axis=2) ** 2), axis=1))
     partB = assemble(alpha * 0.5 * inner(f_, f_) * ds(int(1)))
     return partA + partB
 
@@ -415,14 +386,14 @@ divs_u = []
 # ----------------------------------------------------------------------------------------------------------------------
 
 
-def grad_test(a, v, w, J0, gradj, iter):
+def grad_test(a, v, w, J0, gradj, iter, buoy_mask):
     with open(np_path + f"grad_J_error_{iter}.txt", "w") as text_file:
         text_file.write("reduced Gradient j \t \t approximated gradient J \t Error \t \t \t h_i \n")
         for k in range(1, 9):
             h_ = 10 ** (-k)
             F = a - inner(f + h_ * df, v) * ds(int(1))
             solve(F == 0, w, bcs)
-            _, u_values_array = solve_primal_ode(w)
+            _, u_values_array = solve_primal_ode(w, buoy_mask)
             gradapprox = (J(u_values_array, f + h_ * df) - J0) / h_
             text_file.write(f" {gradj} \t {gradapprox} \t {abs(gradapprox - gradj)} \t {h_} \n")
         text_file.close()
@@ -432,12 +403,12 @@ def grad_test(a, v, w, J0, gradj, iter):
             h_ = 10 ** (-k)
             F = a - inner(f + h_ * df, v) * ds(int(1))
             solve(F == 0, w, bcs)
-            _, u_values_array = solve_primal_ode(w)
+            _, u_values_array = solve_primal_ode(w, buoy_mask)
             jEvalRight = J(u_values_array, f + h_ * df)
 
             F = a - inner(f - h_ * df, v) * ds(int(1))
             solve(F == 0, w, bcs)
-            _, u_values_array = solve_primal_ode(w)
+            _, u_values_array = solve_primal_ode(w, buoy_mask)
             jEvalLeft = J(u_values_array, f - h_ * df)
             gradapprox = (jEvalRight - jEvalLeft) / (2 * h_)
 
@@ -446,17 +417,35 @@ def grad_test(a, v, w, J0, gradj, iter):
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+os.mkdir(np_path + "buoy_movements")
+os.mkdir(np_path + "flow_fields")
+os.mkdir(np_path + "paraview")
+os.mkdir(np_path + "paraview/checkpoint")
+os.mkdir(np_path + "checkpoints")
+os.mkdir(np_path + "q_backup")
+os.mkdir(np_path + "buoy_movements/frames")
+# ----------------------------------------------------------------------------------------------------------------------
+checkpoints = False
+if checkpoints:
+    f = Function(W.sub(0).collapse())
+    with XDMFFile(f"results/dolfin/OCP/experiments/{experiment - 1}/checkpoints/q.xdmf") as infile:
+        infile.read_checkpoint(f, "f")
+# ----------------------------------------------------------------------------------------------------------------------
 tau = 0.5
 tau_inc = 2.0
 c = 1e-4
-LR_MIN = 0.01
-LR_MAX = 2
-LR = 2
-checkpoint = LR
+LR_MIN = 1e-6
+LR_MAX = 1
+LR = LR_MAX
+conv_crit = 1e-3
 # optimization loop
+outer_timing_array = []
+inner_timing_array = []
+inner_iterations_array = []
 for i in range(num_steps):
     buoy_mask = np.zeros(K)
     # ----------------------------------------------------------------------------------------------------------------------
+    start_outer_loop = time.time()
     # solving primal NS
     w = Function(W)
     w_test = TestFunction(W)
@@ -469,10 +458,7 @@ for i in range(num_steps):
     F = a - inner(f, v) * ds(int(1))
 
     solve(F == 0, w, bcs)
-    # c = plot(w.sub(0), title=f"u_{i}_field")
-    # plt.colorbar(c)
-    # plt.savefig(f"{np_path}u_{i}_field.png")
-    # plt.clf()
+
     # ----------------------------------------------------------------------------------------------------------------------
     # solving primal and adjoint ODE
     grad_u = grad(w.sub(0))
@@ -491,7 +477,8 @@ for i in range(num_steps):
     vq_ad = TestFunction(W)
     v_ad, q_ad = split(vq_ad)
 
-    aAdj = (inner(grad(u_ad), grad(v_ad)) + inner(grad(w.sub(0)) * v_ad, u_ad) + inner(grad(v) * w.sub(0), u_ad) + div(
+    aAdj = (inner(grad(u_ad), grad(v_ad)) + inner(grad(w.sub(0)) * v_ad, u_ad) + inner(grad(v) * w.sub(0),
+                                                                                       u_ad) + div(
         u_ad) * q_ad + div(v_ad) * p_ad) * dx - 0.5 * (
                    (dot(dot(w.sub(0), n) * v_ad, u_ad)) + (dot(dot(v_ad, n) * w.sub(0), u_ad))) * ds(int(1))
     FAdj = inner(Constant((0.0, 0.0)), v_ad) * dx
@@ -511,7 +498,7 @@ for i in range(num_steps):
             except:
                 u_x = np.array([0.0, 0.0])
                 point = center_of_domain
-            gamma = h * (u_d[buoy, k, :] - u_x + mu[buoy, k, :])
+            gamma = h * ((u_d[buoy, k, :] - u_x)/1 + mu[buoy, k, :])
             delta0 = PointSource(W.sub(0).sub(0), Point(point), gamma[0])
             delta1 = PointSource(W.sub(0).sub(1), Point(point), gamma[1])
             delta0.apply(b)
@@ -521,45 +508,57 @@ for i in range(num_steps):
     bcs[0].apply(b)
 
     solve(A, zrSol.vector(), b)
+
+    end_outer_loop = time.time()
+    duration_outer_loop = end_outer_loop - start_outer_loop
     # ----------------------------------------------------------------------------------------------------------------------
     # gradient check
     # gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
     if i == 0:
         J0 = J(u_values_array, f)
         # print(J0)
-        # grad_test(a, v, w, J0, gradj, i)
+        # grad_test(a, v, w, J0, gradj, i, buoy_mask)
 
     # ----------------------------------------------------------------------------------------------------------------------
     # line search for gradient update
-    df = - (alpha * f - zSol)
-    gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
-    cond = - c * gradj
-    while True:
-        print("line search at " + str(LR))
-        buoy_mask_LS = np.zeros(K)
-        J_old = J(u_values_array, f)
-        w_ls = Function(W)
-        w_test_ls = TestFunction(W)
+    # start_inner_loop = time.time()
+    inner_iterations = 0
+    # df = - (alpha * f - zSol)
+    # gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
+    # cond = - c * gradj
+    # while True:
+    #     print("line search at " + str(LR))
+    #     inner_iterations += 1
+    #     buoy_mask_LS = np.zeros(K)
+    #     J_old = J(u_values_array, f)
+    #     w_ls = Function(W)
+    #     w_test_ls = TestFunction(W)
+    #
+    #     u_ls, p_ls = split(w_ls)
+    #     v_ls, q_ls = split(w_test_ls)
+    #     f_ls = f + LR * df
+    #     a_ls = (viscosity * inner(grad(u_ls), grad(v_ls)) + inner(dot(grad(u_ls), u_ls), v_ls) + div(
+    #         u_ls) * q_ls + div(
+    #         v_ls) * p_ls) * dx - 0.5 * (dot(dot(u_ls, n) * u_ls, v_ls)) * ds(int(1))
+    #     F_ls = a_ls - inner(f_ls, v_ls) * ds(int(1))
+    #
+    #     solve(F_ls == 0, w_ls, bcs)
+    #     # ----------------------------------------------------------------------------------------------------------------------
+    #
+    #     grad_u_ls = grad(w_ls.sub(0))
+    #     grad_u_proj_ls = project(grad_u_ls, V_vec)
+    #     x_ls, u_values_array_ls = solve_primal_ode(w_ls, buoy_mask_LS)
+    #     J_new = J(u_values_array_ls, f_ls)
+    #     if J_old - J_new >= LR * cond:
+    #         # LR = min(tau_inc * LR, LR_MAX)
+    #         break
+    #     LR = max(tau * LR, LR_MIN)  # max(tau * LR, LR_MIN)
 
-        u_ls, p_ls = split(w_ls)
-        v_ls, q_ls = split(w_test_ls)
-        f_ls = f + LR * df
-        a_ls = (viscosity * inner(grad(u_ls), grad(v_ls)) + inner(dot(grad(u_ls), u_ls), v_ls) + div(u_ls) * q_ls + div(
-            v_ls) * p_ls) * dx - 0.5 * (dot(dot(u_ls, n) * u_ls, v_ls)) * ds(int(1))
-        F_ls = a_ls - inner(f_ls, v_ls) * ds(int(1))
-
-        solve(F_ls == 0, w_ls, bcs)
-        # ----------------------------------------------------------------------------------------------------------------------
-
-        grad_u_ls = grad(w_ls.sub(0))
-        grad_u_proj_ls = project(grad_u_ls, V_vec)
-        x_ls, u_values_array_ls = solve_primal_ode(w_ls, buoy_mask_LS)
-        J_new = J(u_values_array_ls, f_ls)
-        if J_old - J_new >= LR * cond:
-            LR = min(tau_inc * LR, LR_MAX)
-            break
-        LR = max(tau * LR, LR_MIN)  # max(tau * LR, LR_MIN)
-    checkpoint = LR
+    end_inner_loop = time.time()
+    # duration_inner_loop = end_inner_loop - start_inner_loop
+    outer_timing_array.append(duration_outer_loop)
+    # inner_timing_array.append(duration_inner_loop)
+    inner_iterations_array.append(inner_iterations)
 
     # control update
     f = f - LR * (alpha * f - zSol)
@@ -567,25 +566,41 @@ for i in range(num_steps):
     # collecting data
     J_array.append(J(u_values_array, f))
     divs_u.append(sqrt(assemble(div(u) * div(u) * dx)))
-    print(buoy_mask)
+
+    plt.clf()
+    uplot = plot(w.sub(0), title=f"u_{i}_field")
+    plt.colorbar(uplot)
+    plt.savefig(f"{np_path}flow_fields/u_{i}_field.png")
+    plt.clf()
+
+    with XDMFFile(f"{np_path}checkpoints/q.xdmf") as outfile:
+        outfile.write_checkpoint(project(f, W.sub(0).collapse()), "f", 0, append=True)
+
     # condition check
-    if i > 5 and abs((J_array[i] - J_array[i - 1])) < 1e-3:  # / J_array[i - 1]) < 1e-4:
+    if i > 5 and abs((J_array[i] - J_array[i - 1])) < conv_crit:  # / J_array[i - 1]) < 1e-4:
         print("cost small enough")
+        break
+    elif sum(buoy_mask) > 10:
+        print("more than ten buoys out of domain .. exiting")
         break
 
 # ----------------------------------------------------------------------------------------------------------------------
-os.mkdir(np_path + "buoy_movements")
-os.mkdir(np_path + "paraview")
-os.mkdir(np_path + "paraview/checkpoint")
-os.mkdir(np_path + "q_backup")
-os.mkdir(np_path + "buoy_movements/frames")
+with open(timing_file, "w") as time_writer:
+
+    for k, i in enumerate(inner_iterations_array):
+        time_writer.write(f"Iteration {k}:\n")
+        time_writer.write(f"  outer loop time: {outer_timing_array[k]:.6f} seconds\n")
+        # time_writer.write(f"  inner loop time: {inner_timing_array[k]:.6f} seconds\n")
+        time_writer.write(f"  inner loop iterations: {i}\n")
+        time_writer.write("-" * 40 + "\n")
+# ----------------------------------------------------------------------------------------------------------------------
 with XDMFFile(f"{np_path}q_backup/q.xdmf") as outfile:
     outfile.write_checkpoint(project(f, W.sub(0).collapse()), "f", 0, append=True)
 
 # ||u_m - u|| output
 u_bar_loaded = Function(W.sub(0).collapse())
 with XDMFFile(f"results/dolfin/OCP/experiments/{165}/paraview/checkpoint/u.xdmf") as infile:
-    infile.read_checkpoint(u_bar_loaded, "u",0)
+    infile.read_checkpoint(u_bar_loaded, "u", 0)
 
 l2_norm = sqrt(assemble(inner(u - u_bar_loaded, u - u_bar_loaded) * dx))
 H1_norm = sqrt(assemble(inner(u - u_bar_loaded, u - u_bar_loaded) * dx) + assemble(
@@ -613,6 +628,9 @@ with open(np_path + "variables.txt", "w") as text_file:
     text_file.write("viscosity: %s \n" % viscosity)
     text_file.write("buoy count: %s \n" % K)
     text_file.write("LR: %s \n" % LR)
+    text_file.write("LR_MAX: %s \n" % LR_MAX)
+    text_file.write("LR_MIN: %s \n" % LR_MIN)
+    text_file.write("conv. crit.: %s \n" % conv_crit)
     text_file.write("gradient descent steps: %s \n" % num_steps)
 # ----------------------------------------------------------------------------------------------------------------------
 # L2_norm = sqrt(assemble((u - ud_loaded) ** 2 * dx))
@@ -646,7 +664,7 @@ for k, x_ in enumerate(x_array):
     plt.ylabel(r"$y$")
     plt.title(r"Buoy movement result")
     for i, x_buoy in enumerate(x_):
-        plt.scatter(xsarr[i], ysarr[i], color="red", zorder=5)
+        # plt.scatter(xsarr[i], ysarr[i], color="red", zorder=5)
         # plt.text(xsarr[i], ysarr[i] + 0.1, rf"$x_{i + 1}(0)$", ha='center', va='center')
         linestyle = generate_dotted_style(i + 1)
         x_coord = x_buoy[:, 0]
@@ -694,4 +712,4 @@ xdmf_filep.write(px)
 xdmf_file = XDMFFile(f"{np_path}paraview/checkpoint/u.xdmf")
 xdmf_file.write_checkpoint(ux, "u", 0)
 xdmf_filep = XDMFFile(f"{np_path}paraview/checkpoint/p.xdmf")
-xdmf_filep.write_checkpoint(px, "p",0)
+xdmf_filep.write_checkpoint(px, "p", 0)
