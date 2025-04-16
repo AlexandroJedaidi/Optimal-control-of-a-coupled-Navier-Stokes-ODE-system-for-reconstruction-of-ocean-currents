@@ -6,14 +6,15 @@ import matplotlib.pyplot as plt
 import mshr
 import os
 from vedo.dolfin import plot as vplt
-
+plt.rcParams["font.family"] = "TeX Gyre Heros"
+plt.rcParams["mathtext.fontset"] = "cm"
 # ----------------------------------------------------------------------------------------------------------------------
 # setup
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 Nx = 32
-experiment = 8
+experiment = 26
 num_steps = 1
 np_path = f"results/dolfin/OCP/ud_construction/{experiment}/"
 os.mkdir(np_path)
@@ -39,9 +40,9 @@ right_x = 2.0
 right_y = 2.0
 mesh = RectangleMesh(Point(left_x, left_x), Point(right_x, right_y), Nx, Nx)
 Nx_t = 50
-# rect1 = mshr.Rectangle(Point(0.0, 0.0), Point(0.5, 2.0))
-# rect2 = mshr.Rectangle(Point(0.5, 0.0), Point(1.5, 3.0))
-# rect3 = mshr.Rectangle(Point(1.5, 0.0), Point(2.0, 1.8))
+# rect1 = mshr.Rectangle(Point(0.0, 0.0), Point(0.5_2b, 2.0))
+# rect2 = mshr.Rectangle(Point(0.5_2b, 0.0), Point(1.5_2b, 3.0))
+# rect3 = mshr.Rectangle(Point(1.5_2b, 0.0), Point(2.0, 1.8_8b))
 # mesh = mshr.generate_mesh(rect1 + rect2 + rect3, Nx_t)
 plt.title(r"discretized domain $\Omega_h$")
 plt.xlabel("x")
@@ -65,13 +66,12 @@ class Neumann(SubDomain):
 NeumannBD = Neumann()
 
 boundary_function = MeshFunction("size_t", mesh, mesh.geometric_dimension() - 1)
-#boundary_function.set_all(0)
-#NeumannBD.mark(boundary_function, 1)
+# boundary_function.set_all(0)
+# NeumannBD.mark(boundary_function, 1)
 # ----------------------------------------------------------------------------------------------------------------------
 dx = Measure('dx', domain=mesh)
 ds = Measure('ds', domain=mesh, subdomain_data=boundary_function)
 # ----------------------------------------------------------------------------------------------------------------------
-f = Expression(('0', '0'), degree=2)
 df = Expression(('0.1', '0.1'), degree=2)
 # F1 = Expression("pi*sin(pi*x[0])*sin(pi*x[1]) - nu*pi*pi*(-cos(pi*x[0])*sin(pi*x[1]))", nu=viscosity, degree=2)
 # F2 = Expression("-pi*cos(pi*x[0])*cos(pi*x[1]) - nu*pi*pi*(sin(pi*x[0])*cos(pi*x[1]))", nu=viscosity, degree=2)
@@ -89,11 +89,11 @@ P1 = FiniteElement('CG', triangle, 1)
 TH = MixedElement([P2, P1])
 W = FunctionSpace(mesh, TH)
 # ----------------------------------------------------------------------------------------------------------------------
-inflow = Expression(("-cos(pi*x[0])*sin(pi*x[1])", "sin(pi*x[0])*cos(pi*x[1])"), degree=2)
-# inflow = Expression(("1.0", "0.0"), degree=2)
+# inflow = Expression(("-cos(pi*x[0])*sin(pi*x[1])", "sin(pi*x[0])*cos(pi*x[1])"), degree=2)
+inflow = Expression(("0.1", "0.0"), degree=2)
 zero_p = Constant(0)
 zero_velocity = Constant((0.0, 0.0))
-noslip = "near(x[1], 0) || near(x[1], 2) || near(x[1], 1.8) || near(x[1], 3)"
+noslip = "near(x[1], 0) || near(x[1], 2)"
 bc_u_top_bottom = DirichletBC(W.sub(0), zero_velocity, noslip)
 
 # Apply analytical inflow condition on left (x = 0) and right (x = 1) boundaries
@@ -112,9 +112,21 @@ x_d2 = np.zeros_like(time_interval)
 
 def solve_primal_ode(wSol):
     x = np.zeros((K, int(T / h), mesh.geometric_dimension()))
-    x[:, 0, 0] = [0.25, 1.75, 0.5, 1.5]  # np.array([1.0 for i in range(K)])
-    x[:, 0, 1] = [1.25, 0.5, 1.6, 0.3]  # np.linspace(0.5, 1.5, K)
+    x_temp, y_temp = np.meshgrid(np.linspace(0.75, 1.25, 3),
+                                 np.linspace(1.25, 1.75, 3))
+    x_temp2, y_temp2 = np.meshgrid(np.linspace(0.75, 1.25, 2),
+                                   np.linspace(0.25, 0.75, 2))
+    x_temp3, y_temp3 = np.meshgrid(np.linspace(0.1, 0.25, 10),
+                                   np.linspace(0.25, 1.75, 10))
 
+    # x[:, 0, 0] = np.concatenate([x_temp.flatten(), x_temp2.flatten()])
+    # x[:, 0, 1] = np.concatenate([y_temp.flatten(), y_temp2.flatten()])
+    x[:, 0, 0] = np.concatenate([x_temp3.flatten()])
+    x[:, 0, 1] = np.concatenate([y_temp3.flatten()])
+    # x[:, 0, 0] = [0.25, 1.75, 0.5, 1.5, 0.75, 1.0]  # np.array([1.0 for i in range(K)])
+    # x[:, 0, 1] = [1.25, 0.5, 1.6, 0.3, 1.0, 1.5]  # np.linspace(0.5, 1.5, K)
+    # x[:, 0, 1] = [1.25, 0.5, 1.6, 0.3, 1.0, 1.5]  # , 0.75, 1.25]  # np.linspace(0.5_2b, 1.5_2b, K)
+    # x[:, 0, 1] = [1.25, 0.5, 1.6, 0.3, 1.0, 1.5]  # , 0.75, 1.25]  # np.linspace(0.5_2b, 1.5_2b, K)
     u_values_array = np.zeros((K, int(T / h), mesh.geometric_dimension()))
     for b_iter in range(K):
         for k in range(int(T / h) - 1):
@@ -134,9 +146,6 @@ def solve_primal_ode(wSol):
         u_values_array[b_iter, k + 1, :] = wSol.sub(0)(
             np.array([x[b_iter, k + 1, :][0].item(), x[b_iter, k + 1, :][1].item()]))
     return x, u_values_array
-
-
-
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -213,16 +222,21 @@ for k, x_ in enumerate(x_array):
 
 c = plot(u, title=r"Velocity field $u$")
 plt.colorbar(c)
-plt.xlabel(r"$x_1$")
-plt.ylabel(r"$x_2$")
+plt.xlabel(r"$x$")
+plt.ylabel(r"$y$")
 plt.savefig(f"{np_path}u_field.png")
 plt.clf()
 
+L2_norm = sqrt(assemble(u ** 2 * dx))
+H1_norm = sqrt(assemble((u ** 2 + inner(grad(u), grad(u))) * dx))
+with open(np_path + "norms.txt", "w") as text_file:
+    text_file.write("L2: %s \n" % L2_norm)
+    text_file.write("H1: %s \n" % H1_norm)
 
-u,p = w.split()
+u, p = w.split()
 
-xdmf_file = XDMFFile(f"{np_path}paraview/velocity.xdmf")
-xdmf_file.write(u)
+with XDMFFile(f"{np_path}paraview/velocity.xdmf") as outfile:
+    outfile.write_checkpoint(u, "u", 0, append=True)
 
 for k, x_ in enumerate(x_array):
     color = plt.cm.rainbow(np.linspace(0, 1, K))
@@ -236,7 +250,7 @@ for k, x_ in enumerate(x_array):
         plt.ylim(0.0, 2)
         ax = plt.gca()
         ax.set_aspect('equal', adjustable='box')
-        plt.plot(x_coord, y_coord, label=r"$x$ for buoy"+ f"{k+1}", color="b")
+        plt.plot(x_coord, y_coord, label=r"$x$ for buoy" + f"{k + 1}", color="b")
 
     # for line in mesh_boundary:
     #     plt.plot(line[0], line[1], color="gray")

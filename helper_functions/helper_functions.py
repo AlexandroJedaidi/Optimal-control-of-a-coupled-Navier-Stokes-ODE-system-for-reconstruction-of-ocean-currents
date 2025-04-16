@@ -210,7 +210,7 @@ def test_gradient_centered_finite_differences(z, q, opt_iter, ds, W, alpha, np_p
             values[0, :] = np.where(np.isclose(x[1, :], 1.0),
                                     x[0],
                                     0.0)
-            # np.logical_and(np.where(np.isclose(x[0, :], 0.5), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5), 10000, 0.0)))
+            # np.logical_and(np.where(np.isclose(x[0, :], 0.5_2b), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5_2b), 10000, 0.0)))
             values[1, :] = np.where(np.isclose(x[1, :], 1.0),
                                     x[0],
                                     0.0)
@@ -218,7 +218,7 @@ def test_gradient_centered_finite_differences(z, q, opt_iter, ds, W, alpha, np_p
             values[0, :] = np.where(np.isclose(x[1, :], 0.0),
                                     x[0],
                                     0.0)
-            # np.logical_and(np.where(np.isclose(x[0, :], 0.5), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5), 10000, 0.0)))
+            # np.logical_and(np.where(np.isclose(x[0, :], 0.5_2b), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5_2b), 10000, 0.0)))
             values[1, :] = np.where(np.isclose(x[1, :], 0.0),
                                     x[0],
                                     0.0)

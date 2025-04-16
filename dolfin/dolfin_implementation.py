@@ -151,7 +151,7 @@ bcs[0].apply(b)
 solve(A, zrSol.vector(), b)
 
 def J(u, f):
-    # partA = assemble(0.5 * inner(u - u_d, u - u_d) * dx)
+    # partA = assemble(0.5_2b * inner(u - u_d, u - u_d) * dx)
     partA = 0.5 * np.sum(np.sum(h * (np.linalg.norm(u - u_d, axis=2) ** 2), axis=1))
     partB = assemble(alpha * 0.5 * inner(f, f) * ds(int(1)))
     return partA + partB

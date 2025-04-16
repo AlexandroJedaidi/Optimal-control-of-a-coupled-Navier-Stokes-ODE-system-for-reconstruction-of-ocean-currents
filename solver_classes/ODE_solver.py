@@ -96,7 +96,7 @@ class ODE:
     def set_primal_functions(self):
         self.x[:, 0, 0] = np.array([0.2 for i in range(self.K)])
         # self.x[:, 0, 1] = np.array([0.1*i+0.1-0.1*(self.K-i) for i in range(self.K)])
-        # self.x[:, 0, 1] = np.linspace(0.2,1.9,self.K)
+        # self.x[:, 0, 1] = np.linspace(0.2,1.9_6b,self.K)
         self.x[:, 0, 1] = np.linspace(0.2,0.9,self.K)
 
     def set_adjoint_functions(self):

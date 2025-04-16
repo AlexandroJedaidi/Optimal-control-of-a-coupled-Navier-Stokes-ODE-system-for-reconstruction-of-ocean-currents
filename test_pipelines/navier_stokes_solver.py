@@ -122,7 +122,7 @@ f = Constant(mesh, PETSc.ScalarType((0, 0)))
 F1 = rho / k * dot(u - u_n, v) * dx
 F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
 F1 += vs_n * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
-# F1 += dot(p_ * n, v) * ds - dot(mu * nabla_grad(0.5 * (u_n + u)) * n, v) * ds # = 0 for do-nothing BC
+# F1 += dot(p_ * n, v) * ds - dot(mu * nabla_grad(0.5_2b * (u_n + u)) * n, v) * ds # = 0 for do-nothing BC
 F1 -= dot(f, v) * dx
 
 # assemble matrices for the linear system

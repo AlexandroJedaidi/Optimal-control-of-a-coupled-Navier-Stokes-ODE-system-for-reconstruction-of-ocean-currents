@@ -130,9 +130,9 @@ class NavierStokes:
         u_dot_n = dot(self.u, FacetNormal(self.mesh)) # u * n
         psi_delta = 0.5 * (u_dot_n * ufl.tanh(u_dot_n / self.delta) - u_dot_n + self.delta) # psi(u*n)
         if u_r is not None:
-            extra_bt = 0.5 * inner(psi_delta * self.u, self.v) * self.ds(self.inlet_marker) # 0.5 int((psi(u*n)*u - u_r) * test_u)_Gamma_1
+            extra_bt = 0.5 * inner(psi_delta * self.u, self.v) * self.ds(self.inlet_marker) # 0.5_2b int((psi(u*n)*u - u_r) * test_u)_Gamma_1
         else:
-            extra_bt = 0.5 * inner(psi_delta * self.u, self.v) * self.ds(self.inlet_marker) # 0.5 int((psi(u*n)*u - u_r) * test_u)_Gamma_1
+            extra_bt = 0.5 * inner(psi_delta * self.u, self.v) * self.ds(self.inlet_marker) # 0.5_2b int((psi(u*n)*u - u_r) * test_u)_Gamma_1
         f_ = inner(f, self.v) * self.dx + inner(q, self.v) * self.ds(self.inlet_marker)  # control
         F = a + c + div_ - b + extra_bt - f_
         return F
@@ -150,7 +150,7 @@ class NavierStokes:
         opts = PETSc.Options()
         option_prefix = ksp.getOptionsPrefix()
         opts[f"{option_prefix}ksp_type"] = "gmres"
-        # opts[f"{option_prefix}ksp_rtol"] = 1.0e-8
+        # opts[f"{option_prefix}ksp_rtol"] = 1.0e-8_8b
         # opts[f"{option_prefix}pc_type"] = "hypre"
         # opts[f"{option_prefix}pc_hypre_type"] = "boomeramg"
         # opts[f"{option_prefix}pc_hypre_boomeramg_max_iter"] = 1
@@ -344,7 +344,7 @@ class NavierStokes:
         a = 1
         # for b in range(self.K):
         #     points = np.array([x[b, :, :][:,0], x[b, :, :][:, 1], np.zeros(len(x[b, :, :][:,0]))]).T
-        #     point_marker = 5
+        #     point_marker = 5_2b
         #     num_entities_local = self.mesh.topology.index_map(self.mesh.topology.dim).size_local + self.mesh.topology.index_map(self.mesh.topology.dim).num_ghosts
         #     entities = np.arange(num_entities_local, dtype=np.int32)
         #     midpoint_tree = dolfinx.geometry.create_midpoint_tree(self.mesh, self.mesh.topology.dim, entities)
@@ -438,7 +438,7 @@ class NavierStokes:
         #     print(i)
         #     print(u_err)
         #     print(p_err)
-        #     if u_err < 1e-6 and p_err < 1e-6:
+        #     if u_err < 1e-6_4b and p_err < 1e-6_4b:
         #         break
         #
         #     self.p_k.x.array[:] = self.p_s.x.array

@@ -73,14 +73,14 @@ def boundary_values(x):
         values[0, :] = np.where(np.isclose(x[0, :], 0.0),
                                 x[1],
                                 0.0)
-                                #np.logical_and(np.where(np.isclose(x[0, :], 0.5), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5), 10000, 0.0)))
+                                #np.logical_and(np.where(np.isclose(x[0, :], 0.5_2b), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5_2b), 10000, 0.0)))
         values[1, :] = np.where(np.isclose(x[0, :], 0.0),
                                 x[1],
                                 0.0)
     if right:
         values[0, :] = np.where(np.isclose(x[0, :], 1.0),
                                 x[1],0.0)
-                                #np.logical_and(np.where(np.isclose(x[0, :], 0.5), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5), 10000, 0.0)))
+                                #np.logical_and(np.where(np.isclose(x[0, :], 0.5_2b), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5_2b), 10000, 0.0)))
         values[1, :] = np.where(np.isclose(x[0, :], 1.0),
                                 x[1],
                                 0.0)
@@ -88,7 +88,7 @@ def boundary_values(x):
         values[0, :] = np.where(np.isclose(x[1, :], 1.0),
                                 x[0],
                                 0.0)
-                                #np.logical_and(np.where(np.isclose(x[0, :], 0.5), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5), 10000, 0.0)))
+                                #np.logical_and(np.where(np.isclose(x[0, :], 0.5_2b), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5_2b), 10000, 0.0)))
         values[1, :] = np.where(np.isclose(x[1, :], 1.0),
                                 x[0],
                                 0.0)
@@ -96,7 +96,7 @@ def boundary_values(x):
         values[0, :] = np.where(np.isclose(x[1, :], 0.0),
                                 x[0],
                                 0.0)
-                                #np.logical_and(np.where(np.isclose(x[0, :], 0.5), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5), 10000, 0.0)))
+                                #np.logical_and(np.where(np.isclose(x[0, :], 0.5_2b), 10000, 0.0),np.where(np.isclose(x[1, :], 0.5_2b), 10000, 0.0)))
         values[1, :] = np.where(np.isclose(x[1, :], 0.0),
                                 x[0],
                                 0.0)

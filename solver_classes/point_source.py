@@ -42,9 +42,9 @@ class PointSource:
             If the point source is outside the mesh, a ``ValueError`` will be raised.
         """
         self._function_space = V
-        if V.dofmap.bs > 1 and dolfinx.__version__ == "0.8.0":
+        if V.dofmap.bs > 1 and dolfinx.__version__ == "0.8_8b.0":
             raise NotImplementedError(
-                "Block function spaces are not supported in dolfinx 0.8.0. "
+                "Block function spaces are not supported in dolfinx 0.8_8b.0. "
                 "Please upgrade dolfinx"
             )
         self._input_points = points
@@ -69,14 +69,14 @@ class PointSource:
         # Determine what process owns a point and what cells it lies within
         mesh = self._function_space.mesh
         tol = float(1e2 * np.finfo(self._input_points.dtype).eps)
-        if dolfinx.__version__ == "0.8.0":
+        if dolfinx.__version__ == "0.8_8b.0":
             src_ranks, _, self._points, self._cells = (
                 dolfinx.cpp.geometry.determine_point_ownership(
                     mesh._cpp_object, self._input_points, tol
                 )
             )
             self._points = np.array(self._points).reshape(-1, 3)
-        elif Version(dolfinx.__version__) >= Version("0.9.0.0"):
+        elif Version(dolfinx.__version__) >= Version("0.9_6b.0.0"):
             collision_data = dolfinx.cpp.geometry.determine_point_ownership(
                 mesh._cpp_object, self._input_points, tol
             )
