@@ -5,6 +5,9 @@ import os
 import matplotlib.pyplot as plt
 import mshr
 import os
+import matplotlib as mpl
+
+mpl.rcParams['figure.dpi'] = 300
 from vedo.dolfin import plot as vplt
 plt.rcParams["font.family"] = "TeX Gyre Heros"
 plt.rcParams["mathtext.fontset"] = "cm"
@@ -14,7 +17,7 @@ plt.rcParams["mathtext.fontset"] = "cm"
 
 # ----------------------------------------------------------------------------------------------------------------------
 Nx = 32
-experiment = 30
+experiment = 33
 num_steps = 1
 np_path = f"results/dolfin/OCP/ud_construction/{experiment}/"
 os.mkdir(np_path)
@@ -89,8 +92,8 @@ P1 = FiniteElement('CG', triangle, 1)
 TH = MixedElement([P2, P1])
 W = FunctionSpace(mesh, TH)
 # ----------------------------------------------------------------------------------------------------------------------
-# inflow = Expression(("-cos(pi*x[0])*sin(pi*x[1])", "sin(pi*x[0])*cos(pi*x[1])"), degree=2)
-inflow = Expression(("0.1", "0.0"), degree=2)
+inflow = Expression(("-cos(pi*x[0])*sin(pi*x[1])", "sin(pi*x[0])*cos(pi*x[1])"), degree=2)
+# inflow = Expression(("0.1", "0.0"), degree=2)
 zero_p = Constant(0)
 zero_velocity = Constant((0.0, 0.0))
 noslip = "near(x[1], 0) || near(x[1], 2)"
@@ -112,19 +115,19 @@ x_d2 = np.zeros_like(time_interval)
 
 def solve_primal_ode(wSol):
     x = np.zeros((K, int(T / h), mesh.geometric_dimension()))
-    x_temp, y_temp = np.meshgrid(np.linspace(0.75, 1.25, 3),
-                                 np.linspace(1.25, 1.75, 3))
-    x_temp2, y_temp2 = np.meshgrid(np.linspace(0.75, 1.25, 2),
-                                   np.linspace(0.25, 0.75, 2))
-    x_temp3, y_temp3 = np.meshgrid(np.linspace(0.1, 0.4, 1),
-                                   np.linspace(0.25, 1.75, 10))
+    # x_temp, y_temp = np.meshgrid(np.linspace(0.75, 1.25, 3),
+    #                              np.linspace(1.25, 1.75, 3))
+    # x_temp2, y_temp2 = np.meshgrid(np.linspace(0.75, 1.25, 2),
+    #                                np.linspace(0.25, 0.75, 2))
+    # x_temp3, y_temp3 = np.meshgrid(np.linspace(0.1, 0.4, 1),
+    #                                np.linspace(0.25, 1.75, 10))
 
     # x[:, 0, 0] = np.concatenate([x_temp.flatten(), x_temp2.flatten()])
     # x[:, 0, 1] = np.concatenate([y_temp.flatten(), y_temp2.flatten()])
-    x[:, 0, 0] = np.concatenate([x_temp3.flatten()])
-    x[:, 0, 1] = np.concatenate([y_temp3.flatten()])
-    # x[:, 0, 0] = [0.25, 1.75, 0.5, 1.5, 0.75, 1.0]  # np.array([1.0 for i in range(K)])
-    # x[:, 0, 1] = [1.25, 0.5, 1.6, 0.3, 1.0, 1.5]  # np.linspace(0.5, 1.5, K)
+    # x[:, 0, 0] = np.concatenate([x_temp3.flatten()])
+    # x[:, 0, 1] = np.concatenate([y_temp3.flatten()])
+    x[:, 0, 0] = [0.25, 1.75, 0.5, 1.5, 0.75, 1.0]  # np.array([1.0 for i in range(K)])
+    x[:, 0, 1] = [1.25, 0.5, 1.6, 0.3, 1.0, 1.5]  # np.linspace(0.5, 1.5, K)
     # x[:, 0, 1] = [1.25, 0.5, 1.6, 0.3, 1.0, 1.5]  # , 0.75, 1.25]  # np.linspace(0.5_2b, 1.5_2b, K)
     # x[:, 0, 1] = [1.25, 0.5, 1.6, 0.3, 1.0, 1.5]  # , 0.75, 1.25]  # np.linspace(0.5_2b, 1.5_2b, K)
     u_values_array = np.zeros((K, int(T / h), mesh.geometric_dimension()))

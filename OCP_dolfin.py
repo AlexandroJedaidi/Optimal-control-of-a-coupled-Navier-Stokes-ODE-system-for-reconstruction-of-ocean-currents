@@ -6,18 +6,20 @@ import matplotlib.pyplot as plt
 import mshr
 import os
 import time
+import matplotlib as mpl
+
+mpl.rcParams['figure.dpi'] = 300
 
 plt.rcParams["font.family"] = "TeX Gyre Heros"
 plt.rcParams["mathtext.fontset"] = "cm"
 # ----------------------------------------------------------------------------------------------------------------------
 # setup
 
-
 # ----------------------------------------------------------------------------------------------------------------------
 Nx = 32
-experiment = 217
-ud_experiment = 14  # "6_4b"
-num_steps = 200
+experiment = 331
+ud_experiment = 31  # "6_4b"
+num_steps = 1
 np_path = f"results/dolfin/OCP/experiments/{experiment}/"
 timing_file = f"{np_path}timings.txt"
 os.mkdir(np_path)
@@ -47,15 +49,11 @@ mesh = RectangleMesh(Point(left_x, left_x), Point(right_x, right_y), Nx, Nx)
 center_of_domain = np.array([1.0, 1.0])
 Nx_t = 50
 # rect1 = mshr.Rectangle(Point(0.0, 0.0), Point(2.0, 1.0))
+# rect2 = mshr.Rectangle(Point(1.0, 0.0), Point(2.0, 2.0))
 # rect2 = mshr.Rectangle(Point(1.0, 1.0), Point(2.0, 2.0))
 # rect3 = mshr.Rectangle(Point(2.0, 0.0), Point(3.0, 0.8_8b))
 # mesh = mshr.generate_mesh(rect1 + rect2, Nx_t)
-plt.title(r"discretized domain $\Omega_h$")
-plt.xlabel("$x$")
-plt.ylabel("$y$")
-plot(mesh)
-plt.savefig(f"{np_path}mesh.png")
-plt.clf()
+
 # mesh_boundary = [[[0.0, 3.0], [0.0, 0.0]],    # t mesh lines    ___
 #                  [[0.0, 0.0], [0.0, 1.0]],                      # |
 #                  [[0.0, 1.0], [1.0, 1.0]],                      # _
@@ -71,20 +69,34 @@ mesh_boundary = [[[0.0, 2.0], [0.0, 0.0]],
                  [[2.0, 2.0], [2.0, 0.0]]]
 
 
-# mesh_boundary = [[[0.0, 1.0], [0.0, 0.0]],      # l shape
+# mesh_boundary = [[[0.0, 2.0], [0.0, 0.0]],      # l shape
 #                  [[0.0, 0.0], [0.0, 1.0]],
-#                  [[0.0, 2.0], [0.0, 0.0]],
 #                  [[0.0, 1.0], [1.0, 1.0]],
 #                  [[1.0, 1.0], [1.0, 2.0]],
 #                  [[1.0, 2.0], [2.0, 2.0]],
 #                  [[2.0, 2.0], [2.0, 0.0]]]
-
-
+plt.title(r"discretized domain $\Omega_h$")
+plt.xlabel(r"$x$")
+plt.ylabel(r"$y$")
+plot(mesh)
+plt.plot(mesh_boundary[0][0], mesh_boundary[0][1], color="blue")
+plt.plot(mesh_boundary[1][0], mesh_boundary[1][1], color="orange", label=r"$\Gamma_1$")
+plt.plot(mesh_boundary[2][0], mesh_boundary[2][1], color="blue", label=r"$\Gamma_2$")
+plt.plot(mesh_boundary[3][0], mesh_boundary[3][1], color="orange")
+# plt.plot(mesh_boundary[0][0], mesh_boundary[0][1], color="blue")
+# plt.plot(mesh_boundary[1][0], mesh_boundary[1][1], color="orange", label=r"$\Gamma_1$")
+# plt.plot(mesh_boundary[2][0], mesh_boundary[2][1], color="blue", label=r"$\Gamma_2$")
+# plt.plot(mesh_boundary[3][0], mesh_boundary[3][1], color="blue")
+# plt.plot(mesh_boundary[4][0], mesh_boundary[4][1], color="orange")
+# plt.plot(mesh_boundary[5][0], mesh_boundary[5][1], color="blue")
+plt.legend(loc="best", bbox_to_anchor=(1.02, 1))
+plt.savefig(f"{np_path}mesh.png")
+plt.clf()
 # ----------------------------------------------------------------------------------------------------------------------
 
 class Neumann(SubDomain):
     def inside(self, x, on_boundary):
-        return on_boundary and (abs(x[0]) < DOLFIN_EPS or (abs(2.0 - x[0]) < DOLFIN_EPS))
+        return on_boundary and (abs(x[0]) < DOLFIN_EPS or (abs(2.0 - x[0]) < DOLFIN_EPS))   # x[1] for L shape
 
 
 NeumannBD = Neumann()
@@ -119,16 +131,17 @@ with XDMFFile(f"results/dolfin/OCP/ud_construction/{ud_experiment}/paraview/velo
     infile.read_checkpoint(ud_loaded, "u")
 
 load_q = False
+load_string = "243_f_LR_1.5"
 if load_q:
     f = Function(W.sub(0).collapse())
-    with XDMFFile(f"results/dolfin/OCP/experiments/{164}/q_backup/q.xdmf") as infile:
+    with XDMFFile(f"results/dolfin/OCP/experiments/{load_string}/q_backup/q.xdmf") as infile:
         infile.read_checkpoint(f, "f")
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 
 def boundary(x, on_boundary):
-    return on_boundary and (x[0] > DOLFIN_EPS and abs(2.0 - x[0]) > DOLFIN_EPS)
+    return on_boundary and (x[0] > DOLFIN_EPS and abs(2.0 - x[0]) > DOLFIN_EPS)  # x[1] for lshape
 
 
 bcs = [DirichletBC(W.sub(0), (0, 0), boundary)]
@@ -280,17 +293,17 @@ for k in range(K):
             u_d[k, i, 0] = ud1(time_interval[i])  # , al)
             u_d[k, i, 1] = ud2(time_interval[i])  # , al)
 
-plt.title(r"requested buoy movement $x$")
-plt.xlabel(r"$x_1$")
-plt.ylabel(r"$x_2$")
-ax = plt.gca()
-ax.set_aspect('equal', adjustable='box')
-for k in range(K):
-    plt.plot(x_d1[k], x_d2[k], label=r"$x$ of buoy " + f"{k + 1}")
-for line in mesh_boundary:
-    plt.plot(line[0], line[1], color="gray")
-plt.legend(loc="upper right")
-plt.savefig(f"{np_path}x_plot_buoys.png")
+# plt.title(r"requested buoy movement $x$")
+# plt.xlabel(r"$x_1$")
+# plt.ylabel(r"$x_2$")
+# ax = plt.gca()
+# ax.set_aspect('equal', adjustable='box')
+# for k in range(K):
+#     plt.plot(x_d1[k], x_d2[k], label=r"$x$ of buoy " + f"{k + 1}")
+# for line in mesh_boundary:
+#     plt.plot(line[0], line[1], color="gray")
+# plt.legend(loc="upper right")
+# plt.savefig(f"{np_path}x_plot_buoys.png")
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -303,6 +316,7 @@ def solve_primal_ode(wSol, buoy_mask):
     u_values_array = np.zeros((K, int(T / h), mesh.geometric_dimension()))
     for b_iter in range(K):
         for k in range(int(T / h) - 1):
+            print(f"primal ODE: ({b_iter}, {k})")
             point = np.array([x[b_iter, k, :][0].item(), x[b_iter, k, :][1].item()])
             try:
                 u_values = wSol.sub(0)(point)
@@ -332,16 +346,17 @@ def solve_primal_ode(wSol, buoy_mask):
     return x, u_values_array
 
 
-def solve_adjoint_ode(wSol, grad_u, x, buoy_mask):
+def solve_adjoint_ode(wSol, grad_u, x, buoy_mask, u_values_array):
     mu = np.zeros((K, int(T / h), mesh.geometric_dimension()))
     for b_iter in range(K):
         if buoy_mask[b_iter]:
             continue
         N = len(time_interval[1:])
         for k in range(N - 1, -1, -1):
+            #print(f"adjoint ODE: ({b_iter}, {k})")
             point = np.array([x[b_iter, k + 1, :][0].item(), x[b_iter, k + 1, :][1].item()])
             try:
-                u_values = wSol.sub(0)(point)
+                # u_values = wSol.sub(0)(point)
                 grad_u_values = grad_u(point)
                 grad_u_matr = np.array([[grad_u_values[0].item(), grad_u_values[1].item()],
                                         [grad_u_values[2].item(), grad_u_values[3].item()]])
@@ -358,7 +373,7 @@ def solve_adjoint_ode(wSol, grad_u, x, buoy_mask):
                 # grad_u_matr = np.array([[0.0, 0.0],
                 #                         [0.0, 0.0]])
             mu[b_iter, k, :] = mu[b_iter, k + 1, :] - h * grad_u_matr.T @ (
-                (u_values - u_d[b_iter, k + 1, :])/1 - mu[b_iter, k + 1, :])
+                (u_values_array[b_iter, k+1, :] - u_d[b_iter, k + 1, :])/1 - mu[b_iter, k + 1, :])
     return mu
 
 
@@ -431,11 +446,12 @@ if checkpoints:
     with XDMFFile(f"results/dolfin/OCP/experiments/{experiment - 1}/checkpoints/q.xdmf") as infile:
         infile.read_checkpoint(f, "f")
 # ----------------------------------------------------------------------------------------------------------------------
+ns_iterations = []
 tau = 0.5
 tau_inc = 2.0
 c = 1e-4
 LR_MIN = 1e-6
-LR_MAX = 1
+LR_MAX = 5
 LR = LR_MAX
 conv_crit = 1e-3
 # optimization loop
@@ -458,13 +474,12 @@ for i in range(num_steps):
     F = a - inner(f, v) * ds(int(1))
 
     solve(F == 0, w, bcs)
-
     # ----------------------------------------------------------------------------------------------------------------------
     # solving primal and adjoint ODE
     grad_u = grad(w.sub(0))
     grad_u_proj = project(grad_u, V_vec)
     x, u_values_array = solve_primal_ode(w, buoy_mask)
-    mu = solve_adjoint_ode(w, grad_u_proj, x, buoy_mask)
+    mu = solve_adjoint_ode(w, grad_u_proj, x, buoy_mask, u_values_array)
 
     x_array.append(x)
     # ----------------------------------------------------------------------------------------------------------------------
@@ -521,43 +536,43 @@ for i in range(num_steps):
 
     # ----------------------------------------------------------------------------------------------------------------------
     # line search for gradient update
-    # start_inner_loop = time.time()
+    start_inner_loop = time.time()
     inner_iterations = 0
-    # df = - (alpha * f - zSol)
-    # gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
-    # cond = - c * gradj
-    # while True:
-    #     print("line search at " + str(LR))
-    #     inner_iterations += 1
-    #     buoy_mask_LS = np.zeros(K)
-    #     J_old = J(u_values_array, f)
-    #     w_ls = Function(W)
-    #     w_test_ls = TestFunction(W)
-    #
-    #     u_ls, p_ls = split(w_ls)
-    #     v_ls, q_ls = split(w_test_ls)
-    #     f_ls = f + LR * df
-    #     a_ls = (viscosity * inner(grad(u_ls), grad(v_ls)) + inner(dot(grad(u_ls), u_ls), v_ls) + div(
-    #         u_ls) * q_ls + div(
-    #         v_ls) * p_ls) * dx - 0.5 * (dot(dot(u_ls, n) * u_ls, v_ls)) * ds(int(1))
-    #     F_ls = a_ls - inner(f_ls, v_ls) * ds(int(1))
-    #
-    #     solve(F_ls == 0, w_ls, bcs)
-    #     # ----------------------------------------------------------------------------------------------------------------------
-    #
-    #     grad_u_ls = grad(w_ls.sub(0))
-    #     grad_u_proj_ls = project(grad_u_ls, V_vec)
-    #     x_ls, u_values_array_ls = solve_primal_ode(w_ls, buoy_mask_LS)
-    #     J_new = J(u_values_array_ls, f_ls)
-    #     if J_old - J_new >= LR * cond:
-    #         # LR = min(tau_inc * LR, LR_MAX)
-    #         break
-    #     LR = max(tau * LR, LR_MIN)  # max(tau * LR, LR_MIN)
+    df = - (alpha * f - zSol)
+    gradj = assemble(inner(alpha * f - zSol, df) * ds(int(1)))
+    cond = - c * gradj
+    while True:
+        print("line search at " + str(LR))
+        inner_iterations += 1
+        buoy_mask_LS = np.zeros(K)
+        J_old = J(u_values_array, f)
+        w_ls = Function(W)
+        w_test_ls = TestFunction(W)
+
+        u_ls, p_ls = split(w_ls)
+        v_ls, q_ls = split(w_test_ls)
+        f_ls = f + LR * df
+        a_ls = (viscosity * inner(grad(u_ls), grad(v_ls)) + inner(dot(grad(u_ls), u_ls), v_ls) + div(
+            u_ls) * q_ls + div(
+            v_ls) * p_ls) * dx - 0.5 * (dot(dot(u_ls, n) * u_ls, v_ls)) * ds(int(1))
+        F_ls = a_ls - inner(f_ls, v_ls) * ds(int(1))
+
+        solve(F_ls == 0, w_ls, bcs)
+        # ----------------------------------------------------------------------------------------------------------------------
+
+        grad_u_ls = grad(w_ls.sub(0))
+        grad_u_proj_ls = project(grad_u_ls, V_vec)
+        x_ls, u_values_array_ls = solve_primal_ode(w_ls, buoy_mask_LS)
+        J_new = J(u_values_array_ls, f_ls)
+        if J_old - J_new >= LR * cond:
+            # LR = min(tau_inc * LR, LR_MAX)
+            break
+        LR = max(tau * LR, LR_MIN)  # max(tau * LR, LR_MIN)
 
     end_inner_loop = time.time()
-    # duration_inner_loop = end_inner_loop - start_inner_loop
+    duration_inner_loop = end_inner_loop - start_inner_loop
     outer_timing_array.append(duration_outer_loop)
-    # inner_timing_array.append(duration_inner_loop)
+    inner_timing_array.append(duration_inner_loop)
     inner_iterations_array.append(inner_iterations)
 
     # control update
@@ -585,12 +600,17 @@ for i in range(num_steps):
         break
 
 # ----------------------------------------------------------------------------------------------------------------------
+# ns_iters = 0
+# for i in ns_iterations:
+#     ns_iters += i
+# print(f"average NS: iterations: {ns_iters/len(ns_iterations)}")
+# ----------------------------------------------------------------------------------------------------------------------
 with open(timing_file, "w") as time_writer:
 
     for k, i in enumerate(inner_iterations_array):
         time_writer.write(f"Iteration {k}:\n")
         time_writer.write(f"  outer loop time: {outer_timing_array[k]:.6f} seconds\n")
-        # time_writer.write(f"  inner loop time: {inner_timing_array[k]:.6f} seconds\n")
+        time_writer.write(f"  inner loop time: {inner_timing_array[k]:.6f} seconds\n")
         time_writer.write(f"  inner loop iterations: {i}\n")
         time_writer.write("-" * 40 + "\n")
 # ----------------------------------------------------------------------------------------------------------------------
@@ -664,8 +684,8 @@ for k, x_ in enumerate(x_array):
     plt.ylabel(r"$y$")
     plt.title(r"Buoy movement result")
     for i, x_buoy in enumerate(x_):
-        # plt.scatter(xsarr[i], ysarr[i], color="red", zorder=5)
-        # plt.text(xsarr[i], ysarr[i] + 0.1, rf"$x_{i + 1}(0)$", ha='center', va='center')
+        plt.scatter(xsarr[i], ysarr[i], color="red", zorder=5)
+        plt.text(xsarr[i], ysarr[i] + 0.1, rf"$x_{i + 1}(0)$", ha='center', va='center')
         linestyle = generate_dotted_style(i + 1)
         x_coord = x_buoy[:, 0]
         y_coord = x_buoy[:, 1]
@@ -678,23 +698,23 @@ for k, x_ in enumerate(x_array):
 
     for line in mesh_boundary:
         plt.plot(line[0], line[1], color="gray")
-    # plt.legend(loc="best", bbox_to_anchor=(1.02, 1))
+    plt.legend(loc="best", bbox_to_anchor=(1.02, 1))
     plt.savefig(f"{np_path}buoy_movements/frames/buoy_movement_{k}.png")
     plt.clf()
 
-# for k in range(K):
-#     linestyle = generate_dotted_style(k + 1)
-#     plt.title(rf"Velocity comparison for buoy k={k + 1}")
-#     plt.xlabel("Time")
-#     plt.ylabel("Velocity")
-#     plt.plot(time_interval, u_d[k, :, 0], label=rf"$u_{{d,{1}}}$", color="black", alpha=0.8)
-#     plt.plot(time_interval, u_d[k, :, 1], label=rf"$u_{{d,{2}}}$", color="black", alpha=0.8)
-#     plt.plot(time_interval, u_values_array[k, :, 0], label=r"$u_{1}$", linestyle=linestyle, color="b")
-#     plt.plot(time_interval, u_values_array[k, :, 1], label=r"$u_{2}$", linestyle=linestyle, color="b")
-#
-#     plt.legend(loc="best")
-#     plt.savefig(f"{np_path}ud_plot_buoy_{k}.png")
-#     plt.clf()
+for k in range(K):
+    linestyle = generate_dotted_style(k + 1)
+    plt.title(rf"Velocity comparison for buoy k={k + 1}")
+    plt.xlabel("Time")
+    plt.ylabel("Velocity")
+    plt.plot(time_interval, u_d[k, :, 0], label=rf"$u_{{d,{1}}}$", color="black", alpha=0.8)
+    plt.plot(time_interval, u_d[k, :, 1], label=rf"$u_{{d,{2}}}$", color="black", alpha=0.8)
+    plt.plot(time_interval, u_values_array[k, :, 0], label=r"$u_{1}$", linestyle=linestyle, color="b")
+    plt.plot(time_interval, u_values_array[k, :, 1], label=r"$u_{2}$", linestyle=linestyle, color="b")
+
+    plt.legend(loc="best")
+    plt.savefig(f"{np_path}ud_plot_buoy_{k}.png")
+    plt.clf()
 
 c = plot(u, title=r"Velocity field $u$")
 plt.colorbar(c)
@@ -705,9 +725,9 @@ plt.clf()
 
 ux, px = w.split()
 xdmf_file = XDMFFile(f"{np_path}paraview/velocity.xdmf")
-xdmf_file.write(ux)
+xdmf_file.write_checkpoint(ux, "u", 0)
 xdmf_filep = XDMFFile(f"{np_path}paraview/pressure.xdmf")
-xdmf_filep.write(px)
+xdmf_filep.write_checkpoint(px, "p", 0)
 
 xdmf_file = XDMFFile(f"{np_path}paraview/checkpoint/u.xdmf")
 xdmf_file.write_checkpoint(ux, "u", 0)
