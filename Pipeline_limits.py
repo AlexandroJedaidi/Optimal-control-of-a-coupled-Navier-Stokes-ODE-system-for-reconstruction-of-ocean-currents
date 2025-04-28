@@ -260,6 +260,7 @@ inner_iterations_array = []
 # ----------------------------------------------------------------------------------------------------------------------
 # optimization loop
 for i in range(num_steps):
+    print(f"Gradient descent iteration: {i}")
     buoy_mask = np.zeros(K)
     # ----------------------------------------------------------------------------------------------------------------------
     start_outer_loop = time.time()

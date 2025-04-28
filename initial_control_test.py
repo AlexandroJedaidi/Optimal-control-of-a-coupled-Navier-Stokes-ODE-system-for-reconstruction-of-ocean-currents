@@ -79,7 +79,10 @@ with open("parameters.json", "r") as file:
     alpha = parameters["alpha"]
     # LR = parameters["LR"]
     viscosity = parameters["viscosity"]
-    K = parameters["buoy count"]
+# ----------------------------------------------------------------------------------------------------------------------
+import re
+match = re.search(r'\d+', ud_experiment)
+K = int(match.group())
 # ----------------------------------------------------------------------------------------------------------------------
 # rescaling cost
 alpha = alpha * K
@@ -271,6 +274,7 @@ inner_iterations_array = []
 # ----------------------------------------------------------------------------------------------------------------------
 # optimization loop
 for i in range(num_steps):
+    print(f"Gradient descent iteration: {i}")
     buoy_mask = np.zeros(K)
     # ----------------------------------------------------------------------------------------------------------------------
     start_outer_loop = time.time()
