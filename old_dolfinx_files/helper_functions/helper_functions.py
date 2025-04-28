@@ -1,19 +1,13 @@
 import ufl
 from mpi4py import MPI
-import json
-from dolfinx.fem import (Constant, Function, functionspace,
-                         assemble_scalar, dirichletbc, form, locate_dofs_topological, set_bc)
-from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
-                 as_vector, div, dot, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv,
-                 sqrt, transpose, tr)
+from dolfinx.fem import (Function, functionspace,
+                         assemble_scalar, form)
+from ufl import (dot, inner)
 import numpy as np
 import dolfinx
 import matplotlib.pyplot as plt
 from basix.ufl import element, mixed_element
-from dolfinx import mesh, fem, io
-import solver_classes.Navier_stokes_solver
-import solver_classes.ODE_solver
-from test_pipelines.stokes_helper import solve_stokes
+from dolfinx import mesh
 
 
 def evalutate_fuct(fct, points, mesh):

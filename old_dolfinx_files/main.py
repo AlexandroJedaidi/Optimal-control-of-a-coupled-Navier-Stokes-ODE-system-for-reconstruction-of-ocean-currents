@@ -2,22 +2,17 @@
 import os
 import gmsh
 import dolfinx
-from petsc4py import PETSc
 import ufl
-from mpi4py import MPI
 import json
-from dolfinx.fem import (Constant, Function, functionspace,
-                         assemble_scalar, dirichletbc, form, locate_dofs_topological, set_bc)
-from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
-                 as_vector, div, dot, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv,
-                 sqrt, transpose, tr)
+from dolfinx.fem import (Function, functionspace,
+                         assemble_scalar, dirichletbc, form)
+from ufl import (div)
 import numpy as np
-import numpy.typing as npt
 import mesh_init
-import solver_classes.Navier_stokes_solver
+import old_dolfinx_files.solver_classes.Navier_stokes_solver
 import solver_classes.ODE_solver
-from helper_functions.helper_functions import test_gradient, eval_vector_field, \
-    test_gradient_centered_finite_differences, test_gradient_centered_finite_differences_NS
+from helper_functions.helper_functions import eval_vector_field, \
+    test_gradient_centered_finite_differences_NS
 from basix.ufl import element, mixed_element
 import matplotlib.pyplot as plt
 #import imageio.v2 as imageio
@@ -142,8 +137,8 @@ dx_ = ufl.Measure('dx', domain=mesh)
 ds_ = ufl.Measure("ds", subdomain_data=facet_tag)
 # ----------------------------------------------------------------------------------------------------------------------
 # init solver instances
-NS_instance = solver_classes.Navier_stokes_solver.NavierStokes(mesh, facet_tag, 2, 1,
-                                                               experiment_number, np_path, bcu, W, U, dx_, ds_)
+NS_instance = old_dolfinx_files.solver_classes.Navier_stokes_solver.NavierStokes(mesh, facet_tag, 2, 1,
+                                                                                 experiment_number, np_path, bcu, W, U, dx_, ds_)
 ODE_instance = solver_classes.ODE_solver.ODE(mesh, facet_tag)
 
 u_d = ODE_instance.u_d
