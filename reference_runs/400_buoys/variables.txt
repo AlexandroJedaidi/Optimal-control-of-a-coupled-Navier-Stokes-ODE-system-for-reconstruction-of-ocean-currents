@@ -1,0 +1,9 @@
+mesh resolution: 32 
+mesh t shape resolution: 50 
+t0: 0.0 
+T: 1 
+dt: 0.005 
+viscosity: 1 
+buoy count: 400 
+LR: 5 
+gradient descent steps: 1 

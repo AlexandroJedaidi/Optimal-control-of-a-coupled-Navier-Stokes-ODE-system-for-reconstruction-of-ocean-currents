@@ -1,0 +1,10 @@
+mesh resolution: 32 
+mesh t shape resolution: 50 
+ud type: custom_ud 
+t0: 0.0 
+T: 1 
+dt: 0.005 
+viscosity: 1 
+buoy count: 6 
+LR: 4.0 
+gradient descent steps: 1 

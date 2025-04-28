@@ -3,15 +3,11 @@ import sys
 
 import gmsh
 import dolfinx
-import mesh_init
+from old_dolfinx_files import mesh_init
 import ufl
-from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
-                 as_vector, div, dot, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv,
-                 sqrt, transpose, tr)
 from dolfinx.fem import (Constant, Function, functionspace,
                          assemble_scalar, dirichletbc, form, locate_dofs_topological, set_bc)
 from petsc4py import PETSc
-from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
 from scipy.integrate import odeint
 import numpy as np

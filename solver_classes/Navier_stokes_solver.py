@@ -3,7 +3,7 @@ from wsgiref.simple_server import WSGIServer
 
 import gmsh
 import dolfinx
-import mesh_init
+from old_dolfinx_files import mesh_init
 import ufl
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
                  as_vector, div, dot, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv,

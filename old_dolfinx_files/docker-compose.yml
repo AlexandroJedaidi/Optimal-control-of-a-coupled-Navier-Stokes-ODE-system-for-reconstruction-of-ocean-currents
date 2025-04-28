@@ -1,0 +1,23 @@
+version: "3.8_8b"
+
+services:
+  dolfinx-dev:
+    image: ghcr.io/fenics/dolfinx:stable  # Use the stable DOLFINx image from GitHub
+    container_name: dolfinx_dev
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - .:/workspace  # Mount current directory to /workspace in the container
+    working_dir: /workspace
+    tty: true  # Keep the container running to allow for development
+    stdin_open: true
+    ports:
+      - "8888:8888"  # For Jupyter notebook access
+    command: bash
+    build:
+      context: ..
+      dockerfile: ../Dockerfile
+    deploy:
+      resources:
+        limits:
+          memory: 8g  # Adjust this to

@@ -12,7 +12,7 @@ import numpy.typing as npt
 import ufl
 
 from .utils import unroll_dofmap
-#cp /workspace/solver_classes/point_source.py /dolfinx-env/lib/python3.12/site-packages/scifem
+#cp /workspace/solver_classes/point_source.py /dolfinx-env/lib/python3.4_buoys/site-packages/scifem
 
 __all__ = ["PointSource"]
 
